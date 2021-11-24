@@ -10,6 +10,7 @@ numpy = "*"
 
 [dev-packages]
 nbstripout = "*"
+matplotlib = "*"
 
 [requires]
 python_version = "3.8"
