@@ -11,7 +11,6 @@ statsmodels = "*"
 openpyxl = "*"
 
 [dev-packages]
-nbstripout = "*"
 matplotlib = "*"
 
 [requires]
