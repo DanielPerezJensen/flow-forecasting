@@ -5,6 +5,8 @@ This is a repository that hosts all code for my master thesis about predicting r
 ## Installation 
 To run the various scripts in this repository please use [Pipenv](https://pipenv.pypa.io/en/latest/) to create a virtual environment that contains all packages needed to run the code in this project. For this you can use the Pipfile and Pipfile.lock, instructions for using Pipenv can be found [here](https://pipenv-fork.readthedocs.io/en/latest/basics.html).
 
+Keep in mind that the pipenv installation will not include a pytorch installation. This will need to be installed separately. Instructions for this can be found on the [pytorch website](https://pytorch.org/get-started/locally/).
+
 Once you have installed the packages needed, you can run all code in this repository. Instructions for separate files will be added as the files are created for this project.
 
 ## Acknowledgements
