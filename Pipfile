@@ -9,6 +9,7 @@ pandas = "*"
 numpy = "*"
 statsmodels = "*"
 openpyxl = "*"
+tqdm = "*"
 
 [dev-packages]
 matplotlib = "*"
