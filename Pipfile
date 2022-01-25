@@ -12,9 +12,11 @@ openpyxl = "*"
 tqdm = "*"
 scikit-learn = "*"
 plotly = "*"
+pytorch-lightning = "*"
 
 [dev-packages]
 matplotlib = "*"
+tensorboard = "*"
 
 [requires]
 python_version = "3.8"
