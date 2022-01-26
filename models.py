@@ -44,7 +44,8 @@ class MLP(pl.LightningModule):
 
 
 class GRU(pl.LightningModule):
-    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim, dropout_prob, loss_fn=nn.MSELoss(), batch_size=1, lr=1e-3):
+    def __init__(self, input_dim, hidden_dim, layer_dim, output_dim,
+                 dropout_prob, loss_fn=nn.MSELoss(), batch_size=1, lr=1e-3):
         super().__init__()
 
         # Defining the number of layers and the nodes in each layer
@@ -56,7 +57,8 @@ class GRU(pl.LightningModule):
 
         # GRU layers
         self.gru = nn.GRU(
-            input_dim, hidden_dim, layer_dim, batch_first=True, dropout=dropout_prob
+            input_dim, hidden_dim, layer_dim,
+            batch_first=True, dropout=dropout_prob
         )
 
         # Fully connected layer
@@ -67,16 +69,19 @@ class GRU(pl.LightningModule):
 
     def forward(self, x):
         # Initializing hidden state for first input with zeros
-        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim, device=x.device).requires_grad_()
+        h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim,
+                         device=x.device).requires_grad_()
 
-        # Forward propagation by passing in the input and hidden state into the model
+        # Forward propagation by passing in the input and hidden state
         out, _ = self.gru(x, h0.detach())
 
-        # Reshaping the outputs in the shape of (batch_size, seq_length, hidden_size)
+        # Reshaping the outputs in the shape of
+        # (batch_size, seq_length, hidden_size)
         # so that it can fit into the fully connected layer
         out = out[:, -1, :]
 
-        # Convert the final state to our desired output shape (batch_size, output_dim)
+        # Convert the final state to our desired output shape
+        # (batch_size, output_dim)
         out = self.fc(out)
 
         return out
