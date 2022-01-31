@@ -94,8 +94,6 @@ def gather_river_flow_data(lags=12, time_features=False):
     # Convert dataset to lagged dataset
     df_features = generate_lags(flow_mean_df, "river_flow", lags)
 
-    print(time_features)
-
     # Add time as feature if boolean is True
     if time_features:
 
@@ -106,6 +104,42 @@ def gather_river_flow_data(lags=12, time_features=False):
 
         df_features = generate_cyclical_features(df_features, "month", 12, 1)
 
-    dataset = RiverFlowDataset(df_features)
+    return df_features
 
-    return dataset
+
+def split_data(df_features, lag,
+               val_year_min=1998, val_year_max=2002,
+               test_year_min=2013, test_year_max=2019):
+
+    """
+    This functions splits the data into a training, validation and test set
+    based on the years and the lag provided
+    Args:
+        df_features: dataframe containing the features of the overall dataset
+        lag: lag in dataset
+        val_years: years to be used in validation set
+        test_years: years to be used in test set
+    """
+    # We create an offset period range off year/months we don't want in the
+    # training set
+    offset = pd.tseries.offsets.DateOffset(months=lag)
+    val_start = pd.to_datetime(str(val_year_min)) - offset
+    test_start = pd.to_datetime(str(test_year_min)) - offset
+    val_end = pd.to_datetime(str(val_year_max)) + offset
+    test_end = pd.to_datetime(str(test_year_max)) + offset
+
+    val_idx_offset = pd.period_range(start=val_start, end=val_end, freq="M") 
+    test_idx_offset = pd.period_range(start=test_start, end=test_end, freq="M")
+
+    train_df = df_features.loc[~df_features.date.isin(val_idx_offset)]
+    train_df = train_df.loc[~df_features.date.isin(test_idx_offset)]
+
+    # The offset months should not be in the test and validation set, only the
+    # ones we denote in the function
+    real_val_idx = pd.period_range(start=val_year_min, end=val_year_max, freq="M")
+    real_test_idx = pd.period_range(start=test_year_min, end=test_year_max, freq="M")
+
+    val_df = df_features.loc[df_features.date.isin(real_val_idx)]
+    test_df = df_features.loc[df_features.date.isin(real_test_idx)]
+
+    return train_df, val_df, test_df
