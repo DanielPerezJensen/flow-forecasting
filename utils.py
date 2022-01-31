@@ -1,20 +1,17 @@
 import pandas as pd
 import numpy as np
-from tqdm import tqdm
 from torch.utils.data import DataLoader
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-def evaluate(model, validation_set, input_dim=None):
+def evaluate(model, test_loader, input_dim=None):
     model.eval()
     total_loss = 0.0
 
     predictions = []
     values = []
 
-    testloader = DataLoader(validation_set, batch_size=1, num_workers=2)
-
-    for i, data in enumerate(tqdm(testloader)):
+    for i, data in enumerate(test_loader):
         inputs, targets = data
         if input_dim:
             inputs = inputs.view([1, -1, input_dim])
@@ -30,14 +27,17 @@ def evaluate(model, validation_set, input_dim=None):
     return predictions, values
 
 
-def format_predictions(predictions, values, scaler=None):
+def format_predictions(predictions, values, df_test, scaler=None):
     """
     Format predictions and values into dataframe for easy plotting
     """
     vals = np.concatenate(values, axis=0).ravel()
     preds = np.concatenate(predictions, axis=0).ravel()
 
-    df_result = pd.DataFrame(data={"value": vals, "prediction": preds})
+    df_result = pd.DataFrame(data={"value": vals, "prediction": preds},
+                             index=df_test.head(len(vals)).date)
+    df_result.index = df_result.index.to_timestamp()
+    df_result = df_result.sort_index()
 
     return df_result
 

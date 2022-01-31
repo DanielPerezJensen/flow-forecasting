@@ -34,6 +34,8 @@ def plot_predictions(df_result):
 
     layout = dict(
         title="Predictions vs Actual Values for the dataset",
+        xaxis=dict(title="Time", ticklen=5, zeroline=False),
+        yaxis=dict(title="Value", ticklen=5, zeroline=False),
     )
 
     fig = dict(data=data, layout=layout)
