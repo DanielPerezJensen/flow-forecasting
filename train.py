@@ -5,6 +5,7 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import random_split
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import TensorBoardLogger
 import sklearn
 
 # Data processing imports
@@ -26,50 +27,57 @@ import utils
 import plotting
 
 
-def train(model_name, time_features=False, plot=False):
+def train(args):
 
-    dataset = data.gather_river_flow_data(lags=12, time_features=time_features)
-    n = len(dataset)
+    df_features = data.gather_river_flow_data(lags=args.lag, time_features=args.time_features)
+    df_train, df_val, df_test = data.split_data(df_features, args.lag)
 
-    train_set, val_set = torch.utils.data.random_split(
-                            dataset, [round(n * 0.8), round(n * 0.2)]
-                        )
+    train_set = data.RiverFlowDataset(df_train)
+    test_set = data.RiverFlowDataset(df_test)
+    val_set = data.RiverFlowDataset(df_val)
 
-    batch_size = 1
+    # Some general parameters that are valid for all models
+    model_name = args.model_name
+    input_dim = len(train_set[0][0])
+    batch_size = args.batch_size
+    n_epochs = args.epochs
+    learning_rate = args.lr
     loss_fn = nn.MSELoss(reduction="mean")
 
     train_loader = DataLoader(train_set, batch_size=batch_size,
                               shuffle=False, num_workers=8)
-    val_loader = DataLoader(val_set, batch_size=batch_size,
+    test_loader = DataLoader(test_set, batch_size=1,
+                             shuffle=False, num_workers=8)
+    val_loader = DataLoader(val_set, batch_size=1,
                             shuffle=False, num_workers=8)
 
-    # Crude way to distinguish between models
-    # TODO add parameters to parser
     if model_name == "MLP":
-        input_dim = len(train_set[0][0])
 
-        model = models.MLP(inputs=input_dim, loss_fn=loss_fn)
+        model = models.MLP(inputs=input_dim, loss_fn=loss_fn, lr=learning_rate)
 
     elif model_name == "GRU":
 
-        input_dim = len(train_set[0][0])
         hidden_dim = 64
         output_dim = 1
         layer_dim = 3
         dropout_prob = 0.2
-        n_epochs = 100
-        learning_rate = 1e-3
         weight_decay = 1e-6
 
         model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
-                           dropout_prob, lr=1e-3, loss_fn=loss_fn)
+                           dropout_prob, lr=learning_rate, loss_fn=loss_fn,
+                           batch_size=batch_size)
 
-    trainer = pl.Trainer(gpus=0, precision="bf16", max_epochs=5)
+    trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
+                         max_epochs=n_epochs, log_every_n_steps=10)
     trainer.fit(model, train_loader, val_loader)
 
     # Evaluation after training
-    predictions, values = utils.evaluate(model, val_set)
-    df_results = utils.format_predictions(predictions, values)
+    if model_name == "GRU":
+        predictions, values = utils.evaluate(model, test_loader,
+                                             input_dim=input_dim)
+    else:
+        predictions, values = utils.evaluate(model, test_loader)
+    df_results = utils.format_predictions(predictions, values, df_test)
     results_metrics = utils.calculate_metrics(df_results)
 
     print("Metrics of predicted values:")
@@ -85,13 +93,21 @@ if __name__ == "__main__":
 
     parser.add_argument("--model_name", default="MLP", type=str,
                         help="Model to be trained")
-    parser.add_argument("--time_features", default=0, type=int,
+    parser.add_argument("--lag", default=6, type=int,
+                        help="time lag to use as features")
+    parser.add_argument("--batch_size", default=1, type=int,
+                        help="Size of batches during training")
+    parser.add_argument("--epochs", default=50, type=int,
+                        help="Number of epochs to train model for")
+    parser.add_argument("--lr", default=1e-3, type=float,
+                        help="Learning rate")
+    parser.add_argument("--time_features", action='store_true',
                         help="Include time as a (cyclical) feature")
-    parser.add_argument("--plot", default=0, type=int,
+    parser.add_argument("--plot", action="store_true",
                         help="Plot the predictions of the validation set")
+    parser.add_argument("--gpu", action="store_true",
+                        help="Use GPU for training")
 
     args = parser.parse_args()
 
-    train(args.model_name,
-          time_features=args.time_features,
-          plot=args.plot)
+    train(args)
