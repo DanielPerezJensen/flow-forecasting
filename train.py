@@ -9,7 +9,6 @@ from pytorch_lightning.loggers import TensorBoardLogger
 import sklearn
 
 # Data processing imports
-import pandas
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -73,10 +72,10 @@ def train(args):
 
     # Evaluation after training
     if model_name == "GRU":
-        predictions, values = utils.evaluate(model, test_loader,
-                                             input_dim=input_dim)
+        predictions, values = utils.predict(model, test_loader,
+                                            input_dim=input_dim)
     else:
-        predictions, values = utils.evaluate(model, test_loader)
+        predictions, values = utils.predict(model, test_loader)
     df_results = utils.format_predictions(predictions, values, df_test)
     results_metrics = utils.calculate_metrics(df_results)
 
