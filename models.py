@@ -21,6 +21,8 @@ class MLP(pl.LightningModule):
         self.lr = lr
         self.loss_fn = loss_fn
 
+        self.save_hyperparameters()
+
     def forward(self, x):
         return self.layers(x)
 
