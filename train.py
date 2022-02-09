@@ -28,20 +28,21 @@ import plotting
 
 def train(args):
 
-    df_features = data.gather_river_flow_data(lags=args.lag, time_features=args.time_features)
+    df_features = data.gather_river_flow_data(lag=args.lag,
+                                              time_features=args.time_features)
+
+    if args.ndsi_ndvi_features:
+        df_features = data.merge_flow_ndsi_ndvi_df(df_features, lag=args.lag)
+
+    # Split data and convert it to a torch.Dataset
     df_train, df_val, df_test = data.split_data(df_features, args.lag)
 
     train_set = data.RiverFlowDataset(df_train)
     test_set = data.RiverFlowDataset(df_test)
     val_set = data.RiverFlowDataset(df_val)
 
-    # Some general parameters that are valid for all models
-    model_name = args.model_name
-    input_dim = len(train_set[0][0])
+    # Convert Datasets to Dataloader to allow for training
     batch_size = args.batch_size
-    n_epochs = args.epochs
-    learning_rate = args.lr
-    loss_fn = nn.MSELoss(reduction="mean")
 
     train_loader = DataLoader(train_set, batch_size=batch_size,
                               shuffle=False, num_workers=8)
@@ -49,6 +50,13 @@ def train(args):
                              shuffle=False, num_workers=8)
     val_loader = DataLoader(val_set, batch_size=1,
                             shuffle=False, num_workers=8)
+
+    # Some general parameters that are valid for all models
+    model_name = args.model_name
+    input_dim = len(train_set[0][0])
+    n_epochs = args.epochs
+    learning_rate = args.lr
+    loss_fn = nn.MSELoss(reduction="mean")
 
     if model_name == "MLP":
 
@@ -76,7 +84,9 @@ def train(args):
                                             input_dim=input_dim)
     else:
         predictions, values = utils.predict(model, test_loader)
+
     df_results = utils.format_predictions(predictions, values, df_test)
+
     results_metrics = utils.calculate_metrics(df_results)
 
     print("Metrics of predicted values:")
@@ -85,6 +95,7 @@ def train(args):
 
     if plotting:
         plotting.plot_predictions(df_results)
+        plotting.plot_ind_predictions(df_results)
 
 
 if __name__ == "__main__":
@@ -102,6 +113,8 @@ if __name__ == "__main__":
                         help="Learning rate")
     parser.add_argument("--time_features", action='store_true',
                         help="Include time as a (cyclical) feature")
+    parser.add_argument("--ndsi_ndvi_features", action="store_true",
+                        help="Include NDSI/NDVI as a feature")
     parser.add_argument("--plot", action="store_true",
                         help="Plot the predictions of the validation set")
     parser.add_argument("--gpu", action="store_true",

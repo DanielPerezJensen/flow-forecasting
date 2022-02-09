@@ -9,8 +9,9 @@ from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 
 class RiverFlowDataset(Dataset):
     def __init__(self, df, scaler=None):
-        x = df.iloc[:, 2:].values
-        y = df.iloc[:, 1].values[..., np.newaxis]
+
+        x = df.loc[:, ~df.columns.isin(["river_flow", "date"])].values
+        y = df.loc[:, df.columns.isin(["river_flow"])].values
 
         if scaler:
             x = scaler.fit_transform(x)
@@ -40,7 +41,7 @@ def generate_lags(df, value, n_lags):
     df_n = df.copy()
 
     for n in range(1, n_lags + 1):
-        df_n[f"lag_{n}"] = df_n[f"{value}"].shift(n)
+        df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
 
     df_n = df_n.iloc[n_lags:]
 
@@ -69,13 +70,13 @@ def get_scaler(scaler):
     return scalers[scaler.lower()]()
 
 
-def gather_river_flow_data(lags=12, time_features=False):
+def gather_river_flow_data(lag=6, time_features=False):
     """
     This function returns the full preprocessed data using various arguments
-    as a torch.Dataset
+    as a pd.DataFrame
 
     Args:
-        int lags: amount of time lag to be used as features
+        int lag: amount of time lag to be used as features
         bool time_features: use (cyclical) time as a feature
     """
     processed_folder_path = os.path.join("data", "processed")
@@ -92,7 +93,7 @@ def gather_river_flow_data(lags=12, time_features=False):
     flow_mean_df = monthly_flow_data_mean.reset_index()
 
     # Convert dataset to lagged dataset
-    df_features = generate_lags(flow_mean_df, "river_flow", lags)
+    df_features = generate_lags(flow_mean_df, "river_flow", lag)
 
     # Add time as feature if boolean is True
     if time_features:
@@ -103,6 +104,75 @@ def gather_river_flow_data(lags=12, time_features=False):
         )
 
         df_features = generate_cyclical_features(df_features, "month", 12, 1)
+
+    return df_features
+
+
+def gather_ndsi_ndvi_data(lag=6):
+    """
+    This function returns the full processed data using various arguments
+    as a pd.DataFrame
+    Args:
+        lag: amount of time lag to be used as features
+    """
+    processed_folder_path = os.path.join("data", "processed")
+
+    df_NDSI = pd.read_csv(os.path.join(processed_folder_path, "NDSI.csv"),
+                          index_col=0, parse_dates=["date"],
+                          dtype={"Subsubwatershed": str})
+    df_NDVI = pd.read_csv(os.path.join(processed_folder_path, "NDVI.csv"),
+                          index_col=0, parse_dates=["date"],
+                          dtype={"Subsubwatershed": str})
+
+    # Only preserve rows inside station list
+    station_list = ["03400", "03401", "03402",
+                    "03403", "03404", "03410",
+                    "03411", "03412", "03413",
+                    "03414", "03420", "03421"]
+
+    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(station_list)].index
+    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(station_list)].index
+
+    df_NDSI = df_NDSI[df_NDSI.index.isin(keep_rows_ndsi)]
+    df_NDVI = df_NDVI[df_NDVI.index.isin(keep_rows_ndvi)]
+
+    # Sum over all days per NDSI NDVI
+    daily_ndsi_sum = df_NDSI.groupby(pd.PeriodIndex(df_NDSI.date, freq="D"))[["avg"]].sum()
+    monthly_ndsi_mean = daily_ndsi_sum.groupby(pd.PeriodIndex(daily_ndsi_sum.index, freq="M"))[["avg"]].mean()
+
+    daily_ndvi_sum = df_NDVI.groupby(pd.PeriodIndex(df_NDVI.date, freq="D"))[["avg"]].sum()
+    monthly_ndvi_mean = daily_ndvi_sum.groupby(pd.PeriodIndex(daily_ndvi_sum.index, freq="M"))[["avg"]].mean()
+
+    # Rename columns to enable merging
+    ndsi_mean_df = monthly_ndsi_mean.reset_index()
+    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
+
+    ndvi_mean_df = monthly_ndvi_mean.reset_index()
+    ndvi_mean_df = ndvi_mean_df.rename({"avg": "ndvi_avg"}, axis="columns")
+
+    # Merge ndvi and ndsi dataframes into one
+    ndsi_ndvi_mean_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
+
+    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df, "ndsi_avg", lag)
+    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df, "ndvi_avg", lag)
+
+    ndsi_ndvi_mean_df = ndsi_ndvi_mean_df.drop(columns=["ndsi_avg", "ndvi_avg"])
+
+    return ndsi_ndvi_mean_df
+
+
+def merge_flow_ndsi_ndvi_df(df_features, lag=6):
+    """
+    The ndsi_ndvi_mean_df will be merged into df_features and the
+    full dataframe is returned.
+    Args:
+        df_features: dataframe to merge ndsi_ndvi_df into
+    """
+    df_ndsi_ndvi = gather_ndsi_ndvi_data(lag=lag)
+
+    df_features = pd.merge(df_features, df_ndsi_ndvi, how="left")
+    df_features = df_features.dropna(subset=["river_flow"])
+    df_features = df_features.fillna(-1, downcast="infer")
 
     return df_features
 
