@@ -70,3 +70,16 @@ def calculate_metrics(results_df):
             'rmse': mean_squared_error(results_df.value,
                                        results_df.prediction) ** 0.5,
             'r2': r2_score(results_df.value, results_df.prediction)}
+
+
+def load_model(model, ckpt_path):
+    """
+    Loads a model from the given ckpt_path, keep in mind that the ckpt_path
+    must be a stored model of the same module.
+    Args:
+        model: pl.LightningModule
+        ckpt_path: str, denoting path to model
+    """
+    model = model.load_from_checkpoint(ckpt_path)
+
+    return model
