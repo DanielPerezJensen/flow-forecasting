@@ -29,10 +29,8 @@ import plotting
 def train(args):
 
     df_features = data.gather_river_flow_data(lag=args.lag,
-                                              time_features=args.time_features)
-
-    if args.ndsi_ndvi_features:
-        df_features = data.merge_flow_ndsi_ndvi_df(df_features, lag=args.lag)
+                                              time_features=args.time_features,
+                                              index_features=args.index_features)
 
     # Split data and convert it to a torch.Dataset
     df_train, df_val, df_test = data.split_data(df_features, args.lag)
@@ -60,7 +58,9 @@ def train(args):
 
     if model_name == "MLP":
 
-        model = models.MLP(inputs=input_dim, loss_fn=loss_fn, lr=learning_rate)
+        model = models.MLP(inputs=input_dim, loss_fn=loss_fn, lr=learning_rate,
+                           time_features=args.time_features,
+                           index_features=args.index_features)
 
     elif model_name == "GRU":
 
@@ -72,7 +72,9 @@ def train(args):
 
         model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
                            dropout_prob, lr=learning_rate, loss_fn=loss_fn,
-                           batch_size=batch_size)
+                           batch_size=batch_size,
+                           time_features=args.time_features,
+                           index_features=args.index_features)
 
     trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
                          max_epochs=n_epochs, log_every_n_steps=10)
@@ -93,7 +95,7 @@ def train(args):
     for key, val in results_metrics.items():
         print(f"{key.upper()}: {val:.3f}")
 
-    if plotting:
+    if args.plot:
         plotting.plot_predictions(df_results)
         plotting.plot_ind_predictions(df_results)
 
@@ -113,7 +115,7 @@ if __name__ == "__main__":
                         help="Learning rate")
     parser.add_argument("--time_features", action='store_true',
                         help="Include time as a (cyclical) feature")
-    parser.add_argument("--ndsi_ndvi_features", action="store_true",
+    parser.add_argument("--index_features", action="store_true",
                         help="Include NDSI/NDVI as a feature")
     parser.add_argument("--plot", action="store_true",
                         help="Plot the predictions of the validation set")
@@ -121,5 +123,7 @@ if __name__ == "__main__":
                         help="Use GPU for training")
 
     args = parser.parse_args()
+
+    print(args.plot)
 
     train(args)

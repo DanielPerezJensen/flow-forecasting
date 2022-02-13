@@ -29,19 +29,20 @@ class RiverFlowDataset(Dataset):
         return self.x_train[idx], self.y_train[idx]
 
 
-def generate_lags(df, value, n_lags):
+def generate_lags(df, values, n_lags):
     """
     generate_lags
     Generates a dataframe with columns denoting lagged value up to n_lags
     Args:
         df: dataframe to lag
-        value: value to lag
+        value: values to lag
         n_lags: amount of rows to lag
     """
     df_n = df.copy()
 
-    for n in range(1, n_lags + 1):
-        df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+    for value in values:
+        for n in range(1, n_lags + 1):
+            df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
 
     df_n = df_n.iloc[n_lags:]
 
@@ -70,7 +71,7 @@ def get_scaler(scaler):
     return scalers[scaler.lower()]()
 
 
-def gather_river_flow_data(lag=6, time_features=False):
+def gather_river_flow_data(lag=6, time_features=False, index_features=False):
     """
     This function returns the full preprocessed data using various arguments
     as a pd.DataFrame
@@ -93,7 +94,7 @@ def gather_river_flow_data(lag=6, time_features=False):
     flow_mean_df = monthly_flow_data_mean.reset_index()
 
     # Convert dataset to lagged dataset
-    df_features = generate_lags(flow_mean_df, "river_flow", lag)
+    df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
 
     # Add time as feature if boolean is True
     if time_features:
@@ -104,6 +105,9 @@ def gather_river_flow_data(lag=6, time_features=False):
         )
 
         df_features = generate_cyclical_features(df_features, "month", 12, 1)
+
+    if index_features:
+        df_features = merge_flow_ndsi_ndvi_df(df_features, lag=lag)
 
     return df_features
 
@@ -124,39 +128,68 @@ def gather_ndsi_ndvi_data(lag=6):
                           index_col=0, parse_dates=["date"],
                           dtype={"Subsubwatershed": str})
 
-    # Only preserve rows inside station list
-    station_list = ["03400", "03401", "03402",
-                    "03403", "03404", "03410",
-                    "03411", "03412", "03413",
-                    "03414", "03420", "03421"]
+    # Only preserve rows inside subsubwatershed list
+    watersheds = ["03400", "03401", "03402",
+                  "03403", "03404", "03410",
+                  "03411", "03412", "03413",
+                  "03414", "03420", "03421"]
 
-    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(station_list)].index
-    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(station_list)].index
+    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(watersheds)].index
+    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(watersheds)].index
 
     df_NDSI = df_NDSI[df_NDSI.index.isin(keep_rows_ndsi)]
     df_NDVI = df_NDVI[df_NDVI.index.isin(keep_rows_ndvi)]
 
-    # Sum over all days per NDSI NDVI
-    daily_ndsi_sum = df_NDSI.groupby(pd.PeriodIndex(df_NDSI.date, freq="D"))[["avg"]].sum()
-    monthly_ndsi_mean = daily_ndsi_sum.groupby(pd.PeriodIndex(daily_ndsi_sum.index, freq="M"))[["avg"]].mean()
+    # Take sum of each day and average over the months to aggregate area data
+    daily_ndsi_surf_sum = df_NDSI.groupby(
+                            pd.PeriodIndex(df_NDSI.date, freq="M")
+                        )[["Surfavg"]].sum()
+    daily_ndvi_surf_sum = df_NDVI.groupby(
+                            pd.PeriodIndex(df_NDVI.date, freq="M")
+                        )[["Surfavg"]].sum()
 
-    daily_ndvi_sum = df_NDVI.groupby(pd.PeriodIndex(df_NDVI.date, freq="D"))[["avg"]].sum()
-    monthly_ndvi_mean = daily_ndvi_sum.groupby(pd.PeriodIndex(daily_ndvi_sum.index, freq="M"))[["avg"]].mean()
+    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(pd.PeriodIndex(
+                                daily_ndsi_surf_sum.index, freq="M")
+                            )[["Surfavg"]].mean()
+    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(pd.PeriodIndex(
+                                daily_ndvi_surf_sum.index, freq="M")
+                            )[["Surfavg"]].mean()
+
+    # Take average of NDSI values for each month and aggregate
+    monthly_ndsi_mean = df_NDSI.groupby(pd.PeriodIndex(
+                            df_NDSI.date, freq="M")
+                        )[["avg"]].mean()
+    monthly_ndvi_mean = df_NDVI.groupby(pd.PeriodIndex(
+                            df_NDVI.date, freq="M")
+                        )[["avg"]].mean()
 
     # Rename columns to enable merging
     ndsi_mean_df = monthly_ndsi_mean.reset_index()
-    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
-
     ndvi_mean_df = monthly_ndvi_mean.reset_index()
+    surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
+    surf_ndvi_mean_df = monthly_ndvi_surf_mean.reset_index()
+
+    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
     ndvi_mean_df = ndvi_mean_df.rename({"avg": "ndvi_avg"}, axis="columns")
+    surf_ndsi_mean_df = surf_ndsi_mean_df.rename({"Surfavg": "ndsi_surf_avg"},
+                                                 axis="columns")
+    surf_ndvi_mean_df = surf_ndvi_mean_df.rename({"Surfavg": "ndvi_surf_avg"},
+                                                 axis="columns")
 
     # Merge ndvi and ndsi dataframes into one
     ndsi_ndvi_mean_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
+    ndsi_ndvi_mean_df = pd.merge(ndsi_ndvi_mean_df, surf_ndsi_mean_df)
+    ndsi_ndvi_mean_df = pd.merge(ndsi_ndvi_mean_df, surf_ndvi_mean_df)
 
-    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df, "ndsi_avg", lag)
-    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df, "ndvi_avg", lag)
+    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df,
+                                      ["ndsi_avg", "ndvi_avg",
+                                       "ndsi_surf_avg", "ndvi_surf_avg"],
+                                      lag)
 
-    ndsi_ndvi_mean_df = ndsi_ndvi_mean_df.drop(columns=["ndsi_avg", "ndvi_avg"])
+    ndsi_ndvi_mean_df = ndsi_ndvi_mean_df.drop(
+                            columns=["ndsi_avg", "ndvi_avg",
+                                     "ndsi_surf_avg", "ndvi_surf_avg"]
+                        )
 
     return ndsi_ndvi_mean_df
 
@@ -198,7 +231,7 @@ def split_data(df_features, lag,
     val_end = pd.to_datetime(str(val_year_max)) + offset
     test_end = pd.to_datetime(str(test_year_max)) + offset
 
-    val_idx_offset = pd.period_range(start=val_start, end=val_end, freq="M") 
+    val_idx_offset = pd.period_range(start=val_start, end=val_end, freq="M")
     test_idx_offset = pd.period_range(start=test_start, end=test_end, freq="M")
 
     train_df = df_features.loc[~df_features.date.isin(val_idx_offset)]
@@ -206,8 +239,10 @@ def split_data(df_features, lag,
 
     # The offset months should not be in the test and validation set, only the
     # ones we denote in the function
-    real_val_idx = pd.period_range(start=val_year_min, end=val_year_max, freq="M")
-    real_test_idx = pd.period_range(start=test_year_min, end=test_year_max, freq="M")
+    real_val_idx = pd.period_range(start=val_year_min, end=val_year_max,
+                                   freq="M")
+    real_test_idx = pd.period_range(start=test_year_min, end=test_year_max,
+                                    freq="M")
 
     val_df = df_features.loc[df_features.date.isin(real_val_idx)]
     test_df = df_features.loc[df_features.date.isin(real_test_idx)]
