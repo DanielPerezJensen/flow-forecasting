@@ -25,24 +25,49 @@ import utils
 import plotting
 
 
-def load_model(model, ckpt_path):
-    model = model.load_from_checkpoint(ckpt_path)
+def evaluate(version, checkpoint):
+    path = os.path.join("lightning_logs", version,
+                        "checkpoints", checkpoint + ".ckpt")
 
-    return model
+    model, checkpoint = utils.load_model(path)
+    hparams = checkpoint["hyper_parameters"]
 
+    time_features = hparams["time_features"]
+    index_features = hparams["index_features"]
 
-if __name__ == "__main__":
-    path = os.path.join("lightning_logs", "version_0", "checkpoints", "epoch=9-step=4459.ckpt")
-    model = load_model(models.MLP, path)
     model.eval()
 
-    df_features = data.gather_river_flow_data(lags=6, time_features=True)
+    df_features = data.gather_river_flow_data(lag=6,
+                                              time_features=time_features,
+                                              index_features=index_features)
 
     _, _, df_test = data.split_data(df_features, 6)
+
     test_set = data.RiverFlowDataset(df_test)
     test_loader = DataLoader(test_set)
 
     predictions, values = utils.predict(model, test_loader)
 
-    df_result = utils.format_predictions(predictions, values, df_test)
-    plotting.plot_ind_predictions(df_result)
+    df_results = utils.format_predictions(predictions, values, df_test)
+
+    results_metrics = utils.calculate_metrics(df_results)
+
+    print("Metrics of predicted values:")
+    for key, val in results_metrics.items():
+        print(f"{key.upper()}: {val:.3f}")
+
+    plotting.plot_predictions(df_results)
+    plotting.plot_ind_predictions(df_results)
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Train model")
+
+    parser.add_argument("--version", default="version_0", type=str,
+                        help="Run Version")
+    parser.add_argument("--checkpoint", default="epoch=9-step=4459", type=str,
+                        help="Checkpoint name")
+
+    args = parser.parse_args()
+
+    evaluate(args.version, args.checkpoint)

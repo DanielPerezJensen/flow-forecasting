@@ -1,7 +1,10 @@
+import torch
 import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+import models
 
 
 def predict(model, test_loader, input_dim=None):
@@ -72,7 +75,7 @@ def calculate_metrics(results_df):
             'r2': r2_score(results_df.value, results_df.prediction)}
 
 
-def load_model(model, ckpt_path):
+def load_model(ckpt_path):
     """
     Loads a model from the given ckpt_path, keep in mind that the ckpt_path
     must be a stored model of the same module.
@@ -80,6 +83,15 @@ def load_model(model, ckpt_path):
         model: pl.LightningModule
         ckpt_path: str, denoting path to model
     """
+    checkpoint = torch.load(ckpt_path)
+    hparams = checkpoint["hyper_parameters"]
+    model_name = hparams["name"]
+
+    if model_name == "MLP":
+        model = models.MLP(**hparams)
+    elif model_name == "GRU":
+        model = models.GRU(**hparams)
+
     model = model.load_from_checkpoint(ckpt_path)
 
-    return model
+    return model, checkpoint
