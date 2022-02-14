@@ -31,6 +31,7 @@ def evaluate(version, checkpoint):
 
     model, checkpoint = utils.load_model(path)
     hparams = checkpoint["hyper_parameters"]
+    scaler = hparams["scaler"]
 
     time_features = hparams["time_features"]
     index_features = hparams["index_features"]
@@ -41,14 +42,15 @@ def evaluate(version, checkpoint):
                                               time_features=time_features,
                                               index_features=index_features)
 
-    _, _, df_test = data.split_data(df_features, 6)
+    df_train, df_val, df_test = data.split_data(df_features, 6)
+    _, _, X_test_arr, _, _, y_test_arr = data.scale_data(scaler, df_train, df_val, df_test)
 
-    test_set = data.RiverFlowDataset(df_test)
+    test_set = data.RiverFlowDataset(X_test_arr, y_test_arr)
     test_loader = DataLoader(test_set)
 
-    predictions, values = utils.predict(model, test_loader)
+    predictions, values = utils.predict(model, test_loader, hparams.get("input_dim", None))
 
-    df_results = utils.format_predictions(predictions, values, df_test)
+    df_results = utils.format_predictions(predictions, values, df_test, scaler=scaler)
 
     results_metrics = utils.calculate_metrics(df_results)
 
@@ -63,11 +65,11 @@ def evaluate(version, checkpoint):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
-    parser.add_argument("--version", default="version_0", type=str,
-                        help="Run Version")
+    parser.add_argument("--run", default="version_0", type=str,
+                        help="Run Folder")
     parser.add_argument("--checkpoint", default="epoch=9-step=4459", type=str,
                         help="Checkpoint name")
 
     args = parser.parse_args()
 
-    evaluate(args.version, args.checkpoint)
+    evaluate(args.run, args.checkpoint)
