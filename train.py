@@ -32,18 +32,21 @@ def train(args):
                                               time_features=args.time_features,
                                               index_features=args.index_features)
 
+    scaler = data.get_scaler(args.scaler)
+
     # Split data and convert it to a torch.Dataset
     df_train, df_val, df_test = data.split_data(df_features, args.lag)
+    X_train_arr, X_val_arr, X_test_arr, y_train_arr, y_val_arr, y_test_arr = data.scale_data(scaler, df_train, df_val, df_test)
 
-    train_set = data.RiverFlowDataset(df_train)
-    test_set = data.RiverFlowDataset(df_test)
-    val_set = data.RiverFlowDataset(df_val)
+    train_set = data.RiverFlowDataset(X_train_arr, y_train_arr)
+    val_set = data.RiverFlowDataset(X_val_arr, y_val_arr)
+    test_set = data.RiverFlowDataset(X_test_arr, y_test_arr)
 
     # Convert Datasets to Dataloader to allow for training
     batch_size = args.batch_size
 
     train_loader = DataLoader(train_set, batch_size=batch_size,
-                              shuffle=False, num_workers=8)
+                              shuffle=False, num_workers=8,)
     test_loader = DataLoader(test_set, batch_size=1,
                              shuffle=False, num_workers=8)
     val_loader = DataLoader(val_set, batch_size=1,
@@ -58,7 +61,9 @@ def train(args):
 
     if model_name == "MLP":
 
-        model = models.MLP(inputs=input_dim, loss_fn=loss_fn, lr=learning_rate,
+        model = models.MLP(inputs=input_dim, outputs=1, lr=learning_rate,
+                           loss_fn=loss_fn, lag=args.lag,
+                           scaler=scaler,
                            time_features=args.time_features,
                            index_features=args.index_features)
 
@@ -72,7 +77,7 @@ def train(args):
 
         model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
                            dropout_prob, lr=learning_rate, loss_fn=loss_fn,
-                           batch_size=batch_size,
+                           batch_size=batch_size, scaler=scaler,
                            time_features=args.time_features,
                            index_features=args.index_features)
 
@@ -87,7 +92,7 @@ def train(args):
     else:
         predictions, values = utils.predict(model, test_loader)
 
-    df_results = utils.format_predictions(predictions, values, df_test)
+    df_results = utils.format_predictions(predictions, values, df_test, scaler=scaler)
 
     results_metrics = utils.calculate_metrics(df_results)
 
@@ -113,6 +118,10 @@ if __name__ == "__main__":
                         help="Number of epochs to train model for")
     parser.add_argument("--lr", default=1e-3, type=float,
                         help="Learning rate")
+    parser.add_argument("--scaler", default="standard", type=str,
+                        help="Scaler to use for the values",
+                        choices=["none", "minmax", "standard",
+                                 "maxabs", "robust"])
     parser.add_argument("--time_features", action='store_true',
                         help="Include time as a (cyclical) feature")
     parser.add_argument("--index_features", action="store_true",
@@ -123,7 +132,5 @@ if __name__ == "__main__":
                         help="Use GPU for training")
 
     args = parser.parse_args()
-
-    print(args.plot)
 
     train(args)

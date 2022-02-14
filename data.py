@@ -8,25 +8,16 @@ from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 
 
 class RiverFlowDataset(Dataset):
-    def __init__(self, df, scaler=None):
+    def __init__(self, X, y):
 
-        x = df.loc[:, ~df.columns.isin(["river_flow", "date"])].values
-        y = df.loc[:, df.columns.isin(["river_flow"])].values
-
-        if scaler:
-            x = scaler.fit_transform(x)
-            y = scaler.fit_transform(y)
-
-            self.scaler = scaler
-
-        self.x_train = torch.tensor(x, dtype=torch.float32)
-        self.y_train = torch.tensor(y, dtype=torch.float32)
+        self.X = torch.tensor(X, dtype=torch.float32)
+        self.y = torch.tensor(y, dtype=torch.float32)
 
     def __len__(self):
-        return len(self.y_train)
+        return len(self.y)
 
     def __getitem__(self, idx):
-        return self.x_train[idx], self.y_train[idx]
+        return self.X[idx], self.y[idx]
 
 
 def generate_lags(df, values, n_lags):
@@ -50,6 +41,7 @@ def generate_lags(df, values, n_lags):
 
 
 def generate_cyclical_features(df, col_name, period, start_num=0):
+
     kwargs = {
         f"sin_{col_name}":
             lambda x: np.sin(2 * np.pi * (df[col_name] - start_num) / period),
@@ -61,11 +53,14 @@ def generate_cyclical_features(df, col_name, period, start_num=0):
 
 
 def get_scaler(scaler):
+    if scaler == "none":
+        return None
+
     scalers = {
         "minmax": MinMaxScaler,
         "standard": StandardScaler,
         "maxabs": MaxAbsScaler,
-        "robust": RobustScaler
+        "robust": RobustScaler,
     }
 
     return scalers[scaler.lower()]()
@@ -210,6 +205,16 @@ def merge_flow_ndsi_ndvi_df(df_features, lag=6):
     return df_features
 
 
+def feature_label_split(df, target_col):
+    """
+    Split dataframe into two based on target_col
+    """
+    y = df[[target_col]]
+    X = df.drop(columns=[target_col])
+
+    return X, y
+
+
 def split_data(df_features, lag,
                val_year_min=1998, val_year_max=2002,
                test_year_min=2013, test_year_max=2019):
@@ -248,3 +253,37 @@ def split_data(df_features, lag,
     test_df = df_features.loc[df_features.date.isin(real_test_idx)]
 
     return train_df, val_df, test_df
+
+
+def scale_data(scaler, train_df, val_df, test_df):
+    """
+    Returns transformed data according to scaler provided,
+    will return values as is if scaler is None
+    """
+    train_df = train_df.drop(columns=["date"])
+    val_df = val_df.drop(columns=["date"])
+    test_df = test_df.drop(columns=["date"])
+
+    X_train, y_train = feature_label_split(train_df, "river_flow")
+    X_val, y_val = feature_label_split(val_df, "river_flow")
+    X_test, y_test = feature_label_split(test_df, "river_flow")
+
+    # Transform the input according to chosen scaler if it is given
+    if scaler is not None:
+        X_train_arr = scaler.fit_transform(X_train.values)
+        X_val_arr = scaler.transform(X_val.values)
+        X_test_arr = scaler.transform(X_test.values)
+
+        y_train_arr = scaler.fit_transform(y_train.values)
+        y_val_arr = scaler.transform(y_val.values)
+        y_test_arr = scaler.transform(y_test.values)
+    else:
+        X_train_arr = X_train.values
+        X_val_arr = X_val.values
+        X_test_arr = X_test.values
+
+        y_train_arr = y_train.values
+        y_val_arr = y_val.values
+        y_test_arr = y_test.values
+
+    return X_train_arr, X_val_arr, X_test_arr, y_train_arr, y_val_arr, y_test_arr

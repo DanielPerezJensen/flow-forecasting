@@ -39,6 +39,16 @@ def predict(model, test_loader, input_dim=None):
     return predictions, values
 
 
+def inverse_transform(scaler, df, columns):
+    """
+    Transforms values in df columns back to normal values using the given scaler
+    """
+    for col in columns:
+        df[col] = scaler.inverse_transform(df[col])
+
+    return df
+
+
 def format_predictions(predictions, values, df_test, scaler=None):
     """
     Format predictions and values into dataframe for easy plotting
@@ -57,6 +67,9 @@ def format_predictions(predictions, values, df_test, scaler=None):
     merge = pd.merge(df_result, df_test, left_index=True, right_on="date")
     merge = merge.set_index("date")
     merge.index = merge.index.to_timestamp()
+
+    if scaler is not None:
+        merge = inverse_transform(scaler, merge, [["value", "prediction"]])
 
     return merge
 
@@ -86,6 +99,8 @@ def load_model(ckpt_path):
     checkpoint = torch.load(ckpt_path)
     hparams = checkpoint["hyper_parameters"]
     model_name = hparams["name"]
+
+    print(hparams)
 
     if model_name == "MLP":
         model = models.MLP(**hparams)

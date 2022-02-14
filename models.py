@@ -8,7 +8,7 @@ from torch import nn
 
 class MLP(pl.LightningModule):
     def __init__(self, name="MLP", inputs=12, outputs=1, lr=1e-3, loss_fn=nn.MSELoss(),
-                 lag=6, time_features=False, index_features=False):
+                 lag=6, scaler=None, time_features=False, index_features=False):
         super().__init__()
 
         # Defining some parameters about this model
@@ -52,11 +52,10 @@ class MLP(pl.LightningModule):
 
 class GRU(pl.LightningModule):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim,
-                 dropout_prob, loss_fn=nn.MSELoss(), batch_size=1, lr=1e-3,
-                 lag=6, time_features=False, index_features=False):
+                 dropout_prob, name="GRU", loss_fn=nn.MSELoss(), batch_size=1,
+                 lr=1e-3, lag=6, scaler=None,
+                 time_features=False, index_features=False):
         super().__init__()
-
-        self.name = "GRU"
 
         # Defining the number of layers and the nodes in each layer
         self.input_dim = input_dim
@@ -83,7 +82,7 @@ class GRU(pl.LightningModule):
         self.lr = lr
         self.loss_fn = loss_fn
 
-        self.save_hyperparameters
+        self.save_hyperparameters()
 
     def forward(self, x):
         # Initializing hidden state for first input with zeros
