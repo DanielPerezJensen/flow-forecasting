@@ -41,7 +41,7 @@ def predict(model, test_loader, input_dim=None):
 
 def inverse_transform(scaler, df, columns):
     """
-    Transforms values in df columns back to normal values using the given scaler
+    Transforms values in df columns back to normal values using sklearn scaler
     """
     for col in columns:
         df[col] = scaler.inverse_transform(df[col])

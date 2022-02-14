@@ -58,7 +58,8 @@ def plot_ind_predictions(df_result):
         df_result: dataframe coming from utils.format_predictions
     """
     col_list = df_result.columns
-    lag_cols = [i[0] for i in col_list.str.findall("^river_flow_.*") if len(i) > 0][::-1]
+    lag_cols = [i[0] for i in
+                col_list.str.findall("^river_flow_.*") if len(i) > 0][::-1]
     lag_cols.append("river_flow")
 
     n = 16

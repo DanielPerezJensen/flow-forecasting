@@ -7,8 +7,10 @@ from torch import nn
 
 
 class MLP(pl.LightningModule):
-    def __init__(self, name="MLP", inputs=12, outputs=1, lr=1e-3, loss_fn=nn.MSELoss(),
-                 lag=6, scaler=None, time_features=False, index_features=False):
+    def __init__(self, name="MLP", inputs=12, outputs=1, lr=1e-3,
+                 loss_fn=nn.MSELoss(), lag=6, scaler=None,
+                 time_features=False, index_features=False,
+                 index_area_features=False, index_cloud_features=False):
         super().__init__()
 
         # Defining some parameters about this model
@@ -54,7 +56,8 @@ class GRU(pl.LightningModule):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim,
                  dropout_prob, name="GRU", loss_fn=nn.MSELoss(), batch_size=1,
                  lr=1e-3, lag=6, scaler=None,
-                 time_features=False, index_features=False):
+                 time_features=False, index_features=False,
+                 index_area_features=False, index_cloud_features=False):
         super().__init__()
 
         # Defining the number of layers and the nodes in each layer
