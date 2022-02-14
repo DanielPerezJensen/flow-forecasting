@@ -33,24 +33,34 @@ def evaluate(version, checkpoint):
     hparams = checkpoint["hyper_parameters"]
     scaler = hparams["scaler"]
 
+    lag = hparams["lag"]
     time_features = hparams["time_features"]
     index_features = hparams["index_features"]
+    index_area_features = hparams["index_area_features"]
+    index_cloud_features = hparams["index_cloud_features"]
 
     model.eval()
 
-    df_features = data.gather_river_flow_data(lag=6,
-                                              time_features=time_features,
-                                              index_features=index_features)
+    df_features = data.gather_river_flow_data(
+            lag=lag,
+            time_features=time_features,
+            index_features=index_features,
+            index_area_features=index_area_features,
+            index_cloud_features=index_cloud_features
+        )
 
     df_train, df_val, df_test = data.split_data(df_features, 6)
-    _, _, X_test_arr, _, _, y_test_arr = data.scale_data(scaler, df_train, df_val, df_test)
+    _, _, X_test_arr, _, _, y_test_arr = data.scale_data(scaler, df_train,
+                                                         df_val, df_test)
 
     test_set = data.RiverFlowDataset(X_test_arr, y_test_arr)
     test_loader = DataLoader(test_set)
 
-    predictions, values = utils.predict(model, test_loader, hparams.get("input_dim", None))
+    predictions, values = utils.predict(model, test_loader,
+                                        hparams.get("input_dim", None))
 
-    df_results = utils.format_predictions(predictions, values, df_test, scaler=scaler)
+    df_results = utils.format_predictions(predictions, values, df_test,
+                                          scaler=scaler)
 
     results_metrics = utils.calculate_metrics(df_results)
 

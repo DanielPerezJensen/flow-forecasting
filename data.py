@@ -66,7 +66,146 @@ def get_scaler(scaler):
     return scalers[scaler.lower()]()
 
 
-def gather_river_flow_data(lag=6, time_features=False, index_features=False):
+def gather_ndsi_ndvi_data(watersheds=None):
+    """
+    This function returns the full processed data using various arguments
+    as a pd.DataFrame
+    Args:
+        watersheds: list of strings denoting what watersheds to use from data
+        lag: amount of time lag to be used as features
+    """
+    processed_folder_path = os.path.join("data", "processed")
+
+    if watersheds is None:
+
+        watersheds = ["03400", "03401", "03402",
+                      "03403", "03404", "03410",
+                      "03411", "03412", "03413",
+                      "03414", "03420", "03421"]
+
+    df_NDSI = pd.read_csv(os.path.join(processed_folder_path, "NDSI.csv"),
+                          index_col=0, parse_dates=["date"],
+                          dtype={"Subsubwatershed": str})
+    df_NDVI = pd.read_csv(os.path.join(processed_folder_path, "NDVI.csv"),
+                          index_col=0, parse_dates=["date"],
+                          dtype={"Subsubwatershed": str})
+
+    # Only preserve rows inside subsubwatershed list
+    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(watersheds)].index
+    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(watersheds)].index
+
+    df_NDSI = df_NDSI[df_NDSI.index.isin(keep_rows_ndsi)]
+    df_NDVI = df_NDVI[df_NDVI.index.isin(keep_rows_ndvi)]
+
+    return df_NDSI, df_NDVI
+
+
+def aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI, column):
+    """
+    This function will correctly aggregate area data given the column
+    Args:
+        df_NDSI: dataframe containing filtered NDSI values
+        df_NDVI: dataframe containing filtered NDVI values
+        column: column name to aggregate, must contain 'Surf'
+    """
+
+    if "Surf" not in column:
+        raise InputError("'Surf' must be found in column name")
+
+    # Take sum of each day and average over the months to aggregate area data
+    daily_ndsi_surf_sum = df_NDSI.groupby(
+                            pd.PeriodIndex(df_NDSI.date, freq="D")
+                        )[[column]].sum()
+    daily_ndvi_surf_sum = df_NDVI.groupby(
+                            pd.PeriodIndex(df_NDVI.date, freq="D")
+                        )[[column]].sum()
+
+    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(pd.PeriodIndex(
+                                daily_ndsi_surf_sum.index, freq="M")
+                            )[[column]].mean()
+    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(pd.PeriodIndex(
+                                daily_ndvi_surf_sum.index, freq="M")
+                            )[[column]].mean()
+
+    surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
+    surf_ndvi_mean_df = monthly_ndvi_surf_mean.reset_index()
+    surf_ndsi_mean_df = surf_ndsi_mean_df.rename({column: f"ndsi_{column}"},
+                                                 axis="columns")
+    surf_ndvi_mean_df = surf_ndvi_mean_df.rename({column: f"ndvi_{column}"},
+                                                 axis="columns")
+
+    surf_ndsi_ndvi_df = pd.merge(surf_ndsi_mean_df, surf_ndvi_mean_df)
+
+    return surf_ndsi_ndvi_df
+
+
+def aggregate_ndsi_ndvi_data(df_NDSI, df_NDVI, area=False, cloud=False):
+    """
+    Returns the aggregated NDSI NDVI data with lagged variables
+    Args:
+        df_NDSI: dataframe containing filtered NDSI values
+        df_NDVI: dataframe containing filtered NDVI values
+        area: denotes if we include the area as a feature
+        cloud: denotes if we include the cloud area as a feature
+    """
+
+    # Take average of NDSI values for each month and aggregate
+    monthly_ndsi_mean = df_NDSI.groupby(pd.PeriodIndex(
+                            df_NDSI.date, freq="M")
+                        )[["avg"]].mean()
+    monthly_ndvi_mean = df_NDVI.groupby(pd.PeriodIndex(
+                            df_NDVI.date, freq="M")
+                        )[["avg"]].mean()
+
+    # Rename columns to enable merging
+    ndsi_mean_df = monthly_ndsi_mean.reset_index()
+    ndvi_mean_df = monthly_ndvi_mean.reset_index()
+
+    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
+    ndvi_mean_df = ndvi_mean_df.rename({"avg": "ndvi_avg"}, axis="columns")
+
+    # Merge ndvi and ndsi dataframes into one
+    ndsi_ndvi_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
+
+    if area:
+        surf_ndsi_ndvi_df = aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI,
+                                                          "Surfavg")
+        ndsi_ndvi_df = pd.merge(ndsi_ndvi_df, surf_ndsi_ndvi_df)
+
+    if cloud:
+        cloud_ndsi_ndvi_df = aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI,
+                                                           "Surfcloudavg")
+        ndsi_ndvi_df = pd.merge(ndsi_ndvi_df, cloud_ndsi_ndvi_df)
+
+    return ndsi_ndvi_df
+
+
+def merge_flow_ndsi_ndvi_df(df_features, area=False, cloud=False):
+    """
+    The ndsi_ndvi_mean_df will be merged into df_features and the
+    full dataframe is returned.
+    Args:
+        df_features: dataframe to merge ndsi_ndvi_df into
+    """
+    watersheds = ["03400", "03401", "03402",
+                  "03403", "03404", "03410",
+                  "03411", "03412", "03413",
+                  "03414", "03420", "03421"]
+    df_ndsi, df_ndvi = gather_ndsi_ndvi_data(watersheds=watersheds)
+    df_ndsi_ndvi = aggregate_ndsi_ndvi_data(df_ndsi, df_ndvi,
+                                            area=area, cloud=cloud)
+
+    df_features = pd.merge(df_features, df_ndsi_ndvi, how="left")
+    df_features = df_features.dropna(subset=["river_flow"])
+    df_features = df_features.fillna(-1, downcast="infer")
+
+    return df_features
+
+
+def gather_river_flow_data(
+            lag=6, time_features=False, index_features=False,
+            index_area_features=False, index_cloud_features=False
+        ):
     """
     This function returns the full preprocessed data using various arguments
     as a pd.DataFrame
@@ -88,7 +227,6 @@ def gather_river_flow_data(lag=6, time_features=False, index_features=False):
                                 )['river_flow'].mean()
     flow_mean_df = monthly_flow_data_mean.reset_index()
 
-    # Convert dataset to lagged dataset
     df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
 
     # Add time as feature if boolean is True
@@ -102,105 +240,30 @@ def gather_river_flow_data(lag=6, time_features=False, index_features=False):
         df_features = generate_cyclical_features(df_features, "month", 12, 1)
 
     if index_features:
-        df_features = merge_flow_ndsi_ndvi_df(df_features, lag=lag)
+        df_features = merge_flow_ndsi_ndvi_df(df_features,
+                                              area=index_area_features,
+                                              cloud=index_cloud_features)
 
-    return df_features
+        # Convert dataset to lagged dataset
+        df_features = generate_lags(df_features, ["ndsi_avg", "ndvi_avg"], lag)
+        df_features = df_features.drop(columns=["ndsi_avg", "ndvi_avg"])
 
+        # Lag the ndsi and ndvi according to the same lag parameter and
+        # remove current month, as this cannot be used as a feature
+        if index_area_features:
+            df_features = generate_lags(df_features,
+                                        ["ndsi_Surfavg", "ndvi_Surfavg"], lag)
+            df_features = df_features.drop(
+                    columns=["ndsi_Surfavg", "ndvi_Surfavg"]
+                )
 
-def gather_ndsi_ndvi_data(lag=6):
-    """
-    This function returns the full processed data using various arguments
-    as a pd.DataFrame
-    Args:
-        lag: amount of time lag to be used as features
-    """
-    processed_folder_path = os.path.join("data", "processed")
-
-    df_NDSI = pd.read_csv(os.path.join(processed_folder_path, "NDSI.csv"),
-                          index_col=0, parse_dates=["date"],
-                          dtype={"Subsubwatershed": str})
-    df_NDVI = pd.read_csv(os.path.join(processed_folder_path, "NDVI.csv"),
-                          index_col=0, parse_dates=["date"],
-                          dtype={"Subsubwatershed": str})
-
-    # Only preserve rows inside subsubwatershed list
-    watersheds = ["03400", "03401", "03402",
-                  "03403", "03404", "03410",
-                  "03411", "03412", "03413",
-                  "03414", "03420", "03421"]
-
-    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(watersheds)].index
-    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(watersheds)].index
-
-    df_NDSI = df_NDSI[df_NDSI.index.isin(keep_rows_ndsi)]
-    df_NDVI = df_NDVI[df_NDVI.index.isin(keep_rows_ndvi)]
-
-    # Take sum of each day and average over the months to aggregate area data
-    daily_ndsi_surf_sum = df_NDSI.groupby(
-                            pd.PeriodIndex(df_NDSI.date, freq="M")
-                        )[["Surfavg"]].sum()
-    daily_ndvi_surf_sum = df_NDVI.groupby(
-                            pd.PeriodIndex(df_NDVI.date, freq="M")
-                        )[["Surfavg"]].sum()
-
-    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndsi_surf_sum.index, freq="M")
-                            )[["Surfavg"]].mean()
-    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndvi_surf_sum.index, freq="M")
-                            )[["Surfavg"]].mean()
-
-    # Take average of NDSI values for each month and aggregate
-    monthly_ndsi_mean = df_NDSI.groupby(pd.PeriodIndex(
-                            df_NDSI.date, freq="M")
-                        )[["avg"]].mean()
-    monthly_ndvi_mean = df_NDVI.groupby(pd.PeriodIndex(
-                            df_NDVI.date, freq="M")
-                        )[["avg"]].mean()
-
-    # Rename columns to enable merging
-    ndsi_mean_df = monthly_ndsi_mean.reset_index()
-    ndvi_mean_df = monthly_ndvi_mean.reset_index()
-    surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
-    surf_ndvi_mean_df = monthly_ndvi_surf_mean.reset_index()
-
-    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
-    ndvi_mean_df = ndvi_mean_df.rename({"avg": "ndvi_avg"}, axis="columns")
-    surf_ndsi_mean_df = surf_ndsi_mean_df.rename({"Surfavg": "ndsi_surf_avg"},
-                                                 axis="columns")
-    surf_ndvi_mean_df = surf_ndvi_mean_df.rename({"Surfavg": "ndvi_surf_avg"},
-                                                 axis="columns")
-
-    # Merge ndvi and ndsi dataframes into one
-    ndsi_ndvi_mean_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
-    ndsi_ndvi_mean_df = pd.merge(ndsi_ndvi_mean_df, surf_ndsi_mean_df)
-    ndsi_ndvi_mean_df = pd.merge(ndsi_ndvi_mean_df, surf_ndvi_mean_df)
-
-    ndsi_ndvi_mean_df = generate_lags(ndsi_ndvi_mean_df,
-                                      ["ndsi_avg", "ndvi_avg",
-                                       "ndsi_surf_avg", "ndvi_surf_avg"],
-                                      lag)
-
-    ndsi_ndvi_mean_df = ndsi_ndvi_mean_df.drop(
-                            columns=["ndsi_avg", "ndvi_avg",
-                                     "ndsi_surf_avg", "ndvi_surf_avg"]
-                        )
-
-    return ndsi_ndvi_mean_df
-
-
-def merge_flow_ndsi_ndvi_df(df_features, lag=6):
-    """
-    The ndsi_ndvi_mean_df will be merged into df_features and the
-    full dataframe is returned.
-    Args:
-        df_features: dataframe to merge ndsi_ndvi_df into
-    """
-    df_ndsi_ndvi = gather_ndsi_ndvi_data(lag=lag)
-
-    df_features = pd.merge(df_features, df_ndsi_ndvi, how="left")
-    df_features = df_features.dropna(subset=["river_flow"])
-    df_features = df_features.fillna(-1, downcast="infer")
+        if index_cloud_features:
+            df_features = generate_lags(df_features,
+                                        ["ndsi_Surfcloudavg",
+                                         "ndvi_Surfcloudavg"], lag)
+            df_features = df_features.drop(
+                    columns=["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
+                )
 
     return df_features
 
@@ -286,4 +349,5 @@ def scale_data(scaler, train_df, val_df, test_df):
         y_val_arr = y_val.values
         y_test_arr = y_test.values
 
-    return X_train_arr, X_val_arr, X_test_arr, y_train_arr, y_val_arr, y_test_arr
+    return (X_train_arr, X_val_arr, X_test_arr,
+            y_train_arr, y_val_arr, y_test_arr)
