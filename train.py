@@ -28,98 +28,102 @@ import plotting
 
 def train(args):
 
-    df_features = data.gather_river_flow_data(
-                    lag=args.lag,
-                    time_features=args.time_features,
-                    index_features=args.index_features,
-                    index_area_features=args.index_area_features,
-                    index_cloud_features=args.index_cloud_features
-                )
+    run_metrics = collections.defaultdict(list)
 
-    pl.seed_everything(42, workers=True)
+    for seed in args.seeds:
+        df_features = data.gather_river_flow_data(
+                        lag=args.lag,
+                        time_features=args.time_features,
+                        index_features=args.index_features,
+                        index_area_features=args.index_area_features,
+                        index_cloud_features=args.index_cloud_features
+                    )
 
-    scaler = data.get_scaler(args.scaler)
+        pl.seed_everything(seed, workers=True)
 
-    # Split data and convert it to a torch.Dataset
-    df_train, df_val, df_test = data.split_data(df_features, args.lag)
-    arrays = data.scale_data(scaler, df_train, df_val, df_test)
-    X_train, X_val, X_test, y_train, y_val, y_test = arrays
+        scaler = data.get_scaler(args.scaler)
 
-    train_set = data.RiverFlowDataset(X_train, y_train)
-    val_set = data.RiverFlowDataset(X_val, y_val)
-    test_set = data.RiverFlowDataset(X_test, y_test)
+        # Split data and convert it to a torch.Dataset
+        df_train, df_val, df_test = data.split_data(df_features, args.lag)
+        arrays = data.scale_data(scaler, df_train, df_val, df_test)
+        X_train, X_val, X_test, y_train, y_val, y_test = arrays
 
-    # Convert Datasets to Dataloader to allow for training
-    batch_size = args.batch_size
+        train_set = data.RiverFlowDataset(X_train, y_train)
+        val_set = data.RiverFlowDataset(X_val, y_val)
+        test_set = data.RiverFlowDataset(X_test, y_test)
 
-    train_loader = DataLoader(train_set, batch_size=batch_size,
-                              shuffle=False, num_workers=8,)
-    test_loader = DataLoader(test_set, batch_size=1,
-                             shuffle=False, num_workers=8)
-    val_loader = DataLoader(val_set, batch_size=1,
-                            shuffle=False, num_workers=8)
+        # Convert Datasets to Dataloader to allow for training
+        batch_size = args.batch_size
 
-    # Some general parameters that are valid for all models
-    model_name = args.model_name
-    input_dim = len(train_set[0][0])
-    n_epochs = args.epochs
-    learning_rate = args.lr
-    loss_fn = nn.MSELoss(reduction="mean")
+        train_loader = DataLoader(train_set, batch_size=batch_size,
+                                  shuffle=False, num_workers=8,)
+        test_loader = DataLoader(test_set, batch_size=1,
+                                 shuffle=False, num_workers=8)
+        val_loader = DataLoader(val_set, batch_size=1,
+                                shuffle=False, num_workers=8)
 
-    if model_name == "MLP":
+        # Some general parameters that are valid for all models
+        model_name = args.model_name
+        input_dim = len(train_set[0][0])
+        n_epochs = args.epochs
+        learning_rate = args.lr
+        loss_fn = nn.MSELoss(reduction="mean")
 
-        model = models.MLP(inputs=input_dim, outputs=1, lr=learning_rate,
-                           loss_fn=loss_fn, lag=args.lag,
-                           scaler=scaler,
-                           time_features=args.time_features,
-                           index_features=args.index_features,
-                           index_area_features=args.index_area_features,
-                           index_cloud_features=args.index_cloud_features)
+        if model_name == "MLP":
 
-    elif model_name == "GRU":
+            model = models.MLP(inputs=input_dim, outputs=1, lr=learning_rate,
+                               loss_fn=loss_fn, lag=args.lag,
+                               scaler=scaler,
+                               time_features=args.time_features,
+                               index_features=args.index_features,
+                               index_area_features=args.index_area_features,
+                               index_cloud_features=args.index_cloud_features)
 
-        hidden_dim = 64
-        output_dim = 1
-        layer_dim = 3
-        dropout_prob = 0.2
-        weight_decay = 1e-6
+        elif model_name == "GRU":
 
-        model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
-                           dropout_prob, lr=learning_rate, loss_fn=loss_fn,
-                           batch_size=batch_size, scaler=scaler,
-                           time_features=args.time_features,
-                           index_features=args.index_features,
-                           index_area_features=args.index_area_features,
-                           index_cloud_features=args.index_cloud_features)
+            hidden_dim = 64
+            output_dim = 1
+            layer_dim = 3
+            dropout_prob = 0.2
+            weight_decay = 1e-6
 
-    trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
-                         max_epochs=n_epochs, log_every_n_steps=10)
-    trainer.fit(model, train_loader, val_loader)
+            model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
+                               dropout_prob, lr=learning_rate, loss_fn=loss_fn,
+                               batch_size=batch_size, scaler=scaler,
+                               time_features=args.time_features,
+                               index_features=args.index_features,
+                               index_area_features=args.index_area_features,
+                               index_cloud_features=args.index_cloud_features)
 
-    # Evaluation after training
-    if model_name == "GRU":
-        predictions, values = utils.predict(model, test_loader,
-                                            input_dim=input_dim)
-    else:
-        predictions, values = utils.predict(model, test_loader)
+        trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
+                             max_epochs=n_epochs, log_every_n_steps=10)
+        trainer.fit(model, train_loader, val_loader)
 
-    df_results = utils.format_predictions(predictions, values, df_test,
-                                          scaler=scaler)
+        # Evaluation after training
+        if model_name == "GRU":
+            predictions, values = utils.predict(model, test_loader,
+                                                input_dim=input_dim)
+        else:
+            predictions, values = utils.predict(model, test_loader)
 
-    results_metrics = utils.calculate_metrics(df_results)
+        df_results = utils.format_predictions(predictions, values, df_test,
+                                              scaler=scaler)
 
-    print("Metrics of predicted values:")
-    for key, val in results_metrics.items():
-        print(f"{key.upper()}: {val:.3f}")
+        results_metrics = utils.calculate_metrics(df_results)
 
-    if args.plot:
-        plotting.plot_predictions(df_results)
-        plotting.plot_ind_predictions(df_results)
+        print("Metrics of predicted values:")
+        for key, val in results_metrics.items():
+            run_metrics[key].append(val)
+            print(f"{key.upper()}: {val:.3f}")
+
+        if args.plot:
+            plotting.plot_predictions(df_results)
+            plotting.plot_ind_predictions(df_results)
 
     if args.save_run:
         run_data = {
             "model_type": args.model_name,
-            "seed": args.seed,
+            "seeds": args.seeds,
             "lag": args.lag,
             "lr": args.lr,
             "time_features": args.time_features,
@@ -128,19 +132,23 @@ def train(args):
             "index_cloud_features": args.index_cloud_features,
             "epochs": args.epochs,
             "scaler": args.scaler,
-            "mse": round(results_metrics["mse"], 3),
-            "rmse": round(results_metrics["rmse"], 3),
-            "r2": round(results_metrics["r2"], 3)
+            "mse_mean": np.mean(run_metrics["mse"]),
+            "mse_std": np.std(run_metrics["mse"]),
+            "rmse_mean": np.mean(run_metrics["rmse"]),
+            "rmse_std": np.std(run_metrics["rmse"]),
+            "r2_mean": np.mean(run_metrics["r2"]),
+            "r2_std": np.std(run_metrics["r2"])
         }
 
+        df = pd.DataFrame([run_data])
+
         if os.path.isfile("run_metrics.csv"):
-            df = pd.read_csv("run_metrics.csv", index_col=0)
-            df_add = pd.DataFrame([run_data])
-            df = pd.concat([df, df_add], ignore_index=True)
-            df.to_csv("run_metrics.csv")
+            df_add = pd.read_csv("run_metrics.csv", index_col=0)
+            df = pd.concat([df_add, df], ignore_index=True)
+
+            df.to_csv("run_metrics.csv", float_format='%.3f')
         else:
-            df = pd.DataFrame([run_data])
-            df.to_csv("run_metrics.csv")
+            df.to_csv("run_metrics.csv", float_format='%.3f')
 
 
 if __name__ == "__main__":
@@ -148,8 +156,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--model_name", default="MLP", type=str,
                         help="Model to be trained")
-    parser.add_argument("--seed", default=42, type=int,
-                        help="Set seed of run")
+    parser.add_argument("--seeds", default=[52, 86, 91, 10, 73], type=int,
+                        help="Set seeds of runs")
 
     parser.add_argument("--lag", default=6, type=int,
                         help="time lag to use as features")
