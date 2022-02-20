@@ -7,9 +7,9 @@ from torch import nn
 
 
 class MLP(pl.LightningModule):
-    def __init__(self, name="MLP", inputs=12, outputs=1, lr=1e-3,
-                 loss_fn=nn.MSELoss(), lag=6, scaler=None,
-                 time_features=False, index_features=False,
+    def __init__(self, hidden_layers, name="MLP", inputs=12, outputs=1,
+                 lr=1e-3, weight_decay=1e-6, loss_fn=nn.MSELoss(), lag=6,
+                 scaler=None, time_features=False, index_features=False,
                  index_area_features=False, index_cloud_features=False):
         super().__init__()
 
@@ -17,15 +17,20 @@ class MLP(pl.LightningModule):
         self.time_features = time_features
         self.index_features = index_features
 
-        self.layers = nn.Sequential(
-                nn.Linear(inputs, 64),
-                nn.ReLU(),
-                nn.Linear(64, 32),
-                nn.ReLU(),
-                nn.Linear(32, outputs)
-            )
+        self.layers = []
+        layer_sizes = [inputs] + hidden_layers
+
+        for layer_index in range(1, len(layer_sizes)):
+            self.layers.append(nn.Linear(layer_sizes[layer_index - 1],
+                                         layer_sizes[layer_index]))
+            self.layers.append(nn.ReLU())
+
+        self.layers.append(nn.Linear(layer_sizes[-1], outputs))
+
+        self.layers = nn.Sequential(*self.layers)
 
         self.lr = lr
+        self.weight_decay = weight_decay
         self.loss_fn = loss_fn
 
         self.save_hyperparameters()
@@ -34,7 +39,8 @@ class MLP(pl.LightningModule):
         return self.layers(x)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
+                                     weight_decay=self.weight_decay)
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
@@ -55,7 +61,7 @@ class MLP(pl.LightningModule):
 class GRU(pl.LightningModule):
     def __init__(self, input_dim, hidden_dim, layer_dim, output_dim,
                  dropout_prob, name="GRU", loss_fn=nn.MSELoss(), batch_size=1,
-                 lr=1e-3, lag=6, scaler=None,
+                 weight_decay=1e-6, lr=1e-3, lag=6, scaler=None,
                  time_features=False, index_features=False,
                  index_area_features=False, index_cloud_features=False):
         super().__init__()
@@ -83,6 +89,7 @@ class GRU(pl.LightningModule):
         self.fc = nn.Linear(hidden_dim, output_dim)
 
         self.lr = lr
+        self.weight_decay = weight_decay
         self.loss_fn = loss_fn
 
         self.save_hyperparameters()
@@ -107,7 +114,8 @@ class GRU(pl.LightningModule):
         return out
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
+                                     weight_decay=self.weight_decay)
         return optimizer
 
     def training_step(self, train_batch, batch_idx):
