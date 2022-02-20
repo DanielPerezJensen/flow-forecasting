@@ -65,15 +65,21 @@ def train(args):
         # Some general parameters that are valid for all models
         model_name = args.model_name
         input_dim = len(train_set[0][0])
+        output_dim = 1
         n_epochs = args.epochs
         learning_rate = args.lr
+        weight_decay = 1e-6
         loss_fn = nn.MSELoss(reduction="mean")
+
+        params = utils.load_params(model_name, str(args.param_set))
 
         if model_name == "MLP":
 
-            model = models.MLP(inputs=input_dim, outputs=1, lr=learning_rate,
-                               loss_fn=loss_fn, lag=args.lag,
-                               scaler=scaler,
+            layers = params["layers"]
+
+            model = models.MLP(layers, inputs=input_dim, outputs=1,
+                               lr=learning_rate, weight_decay=weight_decay,
+                               loss_fn=loss_fn, lag=args.lag, scaler=scaler,
                                time_features=args.time_features,
                                index_features=args.index_features,
                                index_area_features=args.index_area_features,
@@ -81,16 +87,15 @@ def train(args):
 
         elif model_name == "GRU":
 
-            hidden_dim = 64
-            output_dim = 1
-            layer_dim = 3
-            dropout_prob = 0.2
-            weight_decay = 1e-6
+            hidden_dim = params["hidden_dim"]
+            layer_dim = params["layer_dim"]
+            dropout_prob = params["dropout_prob"]
+            weight_decay = params["weight_decay"]
 
             model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
                                dropout_prob, lr=learning_rate, loss_fn=loss_fn,
-                               batch_size=batch_size, scaler=scaler,
-                               time_features=args.time_features,
+                               batch_size=batch_size, weight_decay=weight_decay,
+                               scaler=scaler, time_features=args.time_features,
                                index_features=args.index_features,
                                index_area_features=args.index_area_features,
                                index_cloud_features=args.index_cloud_features)
@@ -123,6 +128,7 @@ def train(args):
     if args.save_run:
         run_data = {
             "model_type": args.model_name,
+            "param_set": args.param_set,
             "seeds": args.seeds,
             "lag": args.lag,
             "lr": args.lr,
@@ -155,9 +161,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
     parser.add_argument("--model_name", default="MLP", type=str,
-                        help="Model to be trained")
+                        help="Model to be trained",
+                        choices=["GRU", "MLP"])
     parser.add_argument("--seeds", default=[52, 86, 91, 10, 73], type=int,
-                        help="Set seeds of runs")
+                        nargs="+", help="Set seeds of runs")
+    parser.add_argument("--param_set", default=1, type=int,
+                        help="Choose param set from models.json")
 
     parser.add_argument("--lag", default=6, type=int,
                         help="time lag to use as features")

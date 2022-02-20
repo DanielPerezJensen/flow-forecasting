@@ -3,7 +3,8 @@ import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
+import json
+import os
 import models
 
 
@@ -110,3 +111,15 @@ def load_model(ckpt_path):
     model = model.load_from_checkpoint(ckpt_path)
 
     return model, checkpoint
+
+
+def load_params(model_name, param_set):
+    """
+    Loads a parameter set from models.json
+    """
+    assert os.path.exists("models.json")
+
+    with open("models.json", "r") as f:
+        data = json.load(f)
+
+    return data[model_name][param_set]
