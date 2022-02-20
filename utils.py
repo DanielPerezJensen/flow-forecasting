@@ -8,7 +8,7 @@ import os
 import models
 
 
-def predict(model, test_loader, input_dim=None):
+def predict(model, test_loader):
     """
     This function gathers the predictions from the model and the
     actual values found in the test_loader. Input_dim is only
@@ -16,7 +16,6 @@ def predict(model, test_loader, input_dim=None):
     Args:
         model: PytorchLightningModule
         test_loader: pytorch.DataLoader
-        input_dim: optional arg, only used if model is a GRU
     """
     model.eval()
     total_loss = 0.0
@@ -26,8 +25,8 @@ def predict(model, test_loader, input_dim=None):
 
     for i, data in enumerate(test_loader):
         inputs, targets = data
-        if input_dim:
-            inputs = inputs.view([1, -1, input_dim])
+        if model.name == "GRU":
+            inputs = inputs.view([1, -1, model.input_dim])
 
         inputs = inputs.to(model.device)
         targets = targets.to(model.device)
@@ -122,4 +121,46 @@ def load_params(model_name, param_set):
     with open("models.json", "r") as f:
         data = json.load(f)
 
-    return data[model_name][param_set]
+    return data[model_name][str(param_set)]
+
+
+def get_model(args):
+
+    params = load_params(args.model_name, args.param_set)
+
+    # Load default values from args
+    input_dim = args.input_dim
+    output_dim = args.output_dim
+    loss_fn = torch.nn.MSELoss(reduction="mean")
+
+    if args.model_name == "MLP":
+        layers = params["layers"]
+        weight_decay = params["weight_decay"]
+
+        model = models.MLP(layers, inputs=input_dim, outputs=1,
+                           lr=args.lr, weight_decay=weight_decay,
+                           loss_fn=loss_fn, lag=args.lag, 
+                           scaler=args.scaler_func,
+                           time_features=args.time_features,
+                           index_features=args.index_features,
+                           index_area_features=args.index_area_features,
+                           index_cloud_features=args.index_cloud_features)
+
+    elif args.model_name == "GRU":
+        input_dim = args.input_dim
+        hidden_dim = params["hidden_dim"]
+        layer_dim = params["layer_dim"]
+        dropout_prob = params["dropout_prob"]
+        weight_decay = params["weight_decay"]
+
+        model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
+                           dropout_prob, lr=args.lr, loss_fn=loss_fn,
+                           batch_size=args.batch_size,
+                           weight_decay=weight_decay,
+                           scaler=args.scaler_func,
+                           time_features=args.time_features,
+                           index_features=args.index_features,
+                           index_area_features=args.index_area_features,
+                           index_cloud_features=args.index_cloud_features)
+
+    return model

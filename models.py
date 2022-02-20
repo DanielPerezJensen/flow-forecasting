@@ -13,6 +13,8 @@ class MLP(pl.LightningModule):
                  index_area_features=False, index_cloud_features=False):
         super().__init__()
 
+        self.name = name
+
         # Defining some parameters about this model
         self.time_features = time_features
         self.index_features = index_features
@@ -65,6 +67,8 @@ class GRU(pl.LightningModule):
                  time_features=False, index_features=False,
                  index_area_features=False, index_cloud_features=False):
         super().__init__()
+
+        self.name = name
 
         # Defining the number of layers and the nodes in each layer
         self.input_dim = input_dim

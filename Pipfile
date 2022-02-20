@@ -13,6 +13,7 @@ tqdm = "*"
 scikit-learn = "*"
 plotly = "*"
 pytorch-lightning = "*"
+wandb = "*"
 
 [dev-packages]
 matplotlib = "*"

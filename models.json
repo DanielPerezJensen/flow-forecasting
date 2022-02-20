@@ -33,13 +33,16 @@
     },
     "MLP": {
         "0": {
-            "layers": [64, 32]
+            "layers": [64, 32],
+            "weight_decay": 1e-6
         },
         "1": {
-            "layers": [64, 32, 16]
+            "layers": [64, 32, 16],
+            "weight_decay": 1e-6
         },
         "2": {
-            "layers": [32]
+            "layers": [32],
+            "weight_decay": 1e-6
         }
     }
 }

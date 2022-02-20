@@ -132,3 +132,5 @@ data/processed
 lightning_logs
 runs.sh
 run_metrics.csv
+river-flow-prediction
+wandb

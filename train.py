@@ -6,6 +6,8 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import random_split
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import WandbLogger
+import wandb
 import sklearn
 
 # Data processing imports
@@ -66,50 +68,22 @@ def train(args):
         model_name = args.model_name
         input_dim = len(train_set[0][0])
         output_dim = 1
-        n_epochs = args.epochs
-        learning_rate = args.lr
-        weight_decay = 1e-6
-        loss_fn = nn.MSELoss(reduction="mean")
 
-        params = utils.load_params(model_name, str(args.param_set))
+        # Store some default params
+        setattr(args, "input_dim", len(train_set[0][0]))
+        setattr(args, "output_dim", 1)
+        setattr(args, "scaler_func", scaler)
 
-        if model_name == "MLP":
+        model = utils.get_model(args)
 
-            layers = params["layers"]
-
-            model = models.MLP(layers, inputs=input_dim, outputs=1,
-                               lr=learning_rate, weight_decay=weight_decay,
-                               loss_fn=loss_fn, lag=args.lag, scaler=scaler,
-                               time_features=args.time_features,
-                               index_features=args.index_features,
-                               index_area_features=args.index_area_features,
-                               index_cloud_features=args.index_cloud_features)
-
-        elif model_name == "GRU":
-
-            hidden_dim = params["hidden_dim"]
-            layer_dim = params["layer_dim"]
-            dropout_prob = params["dropout_prob"]
-            weight_decay = params["weight_decay"]
-
-            model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
-                               dropout_prob, lr=learning_rate, loss_fn=loss_fn,
-                               batch_size=batch_size, weight_decay=weight_decay,
-                               scaler=scaler, time_features=args.time_features,
-                               index_features=args.index_features,
-                               index_area_features=args.index_area_features,
-                               index_cloud_features=args.index_cloud_features)
-
+        wandb_logger = WandbLogger(project="river-flow-prediction", offline=args.wandb)
         trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
-                             max_epochs=n_epochs, log_every_n_steps=10)
+                             max_epochs=args.epochs, logger=wandb_logger)
         trainer.fit(model, train_loader, val_loader)
+        wandb.finish(quiet=True)
 
         # Evaluation after training
-        if model_name == "GRU":
-            predictions, values = utils.predict(model, test_loader,
-                                                input_dim=input_dim)
-        else:
-            predictions, values = utils.predict(model, test_loader)
+        predictions, values = utils.predict(model, test_loader)
 
         df_results = utils.format_predictions(predictions, values, df_test,
                                               scaler=scaler)
@@ -151,6 +125,8 @@ def train(args):
         if os.path.isfile("run_metrics.csv"):
             df_add = pd.read_csv("run_metrics.csv", index_col=0)
             df = pd.concat([df_add, df], ignore_index=True)
+            df = df.sort_values(by=["r2_mean", "r2_std"],
+                                ascending=False, ignore_index=True)
 
             df.to_csv("run_metrics.csv", float_format='%.3f')
         else:
@@ -195,6 +171,8 @@ if __name__ == "__main__":
                         help="Save the metrics of this run to run_metrics.csv")
     parser.add_argument("--plot", action="store_true",
                         help="Plot the predictions of the validation set")
+    parser.add_argument("--wandb", action="store_false",
+                        help="Flag to set if you want to upload to wandb.ai")
     parser.add_argument("--gpu", action="store_true",
                         help="Use GPU for training")
 
