@@ -130,3 +130,5 @@ dmypy.json
 
 data/processed
 lightning_logs
+runs.sh
+run_metrics.csv
