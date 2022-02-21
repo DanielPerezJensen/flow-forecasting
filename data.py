@@ -100,7 +100,7 @@ def gather_ndsi_ndvi_data(watersheds=None):
     return df_NDSI, df_NDVI
 
 
-def aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI, column):
+def aggregate_area_data(df_NDSI, df_NDVI, column):
     """
     This function will correctly aggregate area data given the column
     Args:
@@ -139,14 +139,12 @@ def aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI, column):
     return surf_ndsi_ndvi_df
 
 
-def aggregate_ndsi_ndvi_data(df_NDSI, df_NDVI, area=False, cloud=False):
+def aggregate_index_data(df_NDSI, df_NDVI):
     """
     Returns the aggregated NDSI NDVI data with lagged variables
     Args:
         df_NDSI: dataframe containing filtered NDSI values
         df_NDVI: dataframe containing filtered NDVI values
-        area: denotes if we include the area as a feature
-        cloud: denotes if we include the cloud area as a feature
     """
 
     # Take average of NDSI values for each month and aggregate
@@ -167,23 +165,13 @@ def aggregate_ndsi_ndvi_data(df_NDSI, df_NDVI, area=False, cloud=False):
     # Merge ndvi and ndsi dataframes into one
     ndsi_ndvi_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
 
-    if area:
-        surf_ndsi_ndvi_df = aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI,
-                                                          "Surfavg")
-        ndsi_ndvi_df = pd.merge(ndsi_ndvi_df, surf_ndsi_ndvi_df)
-
-    if cloud:
-        cloud_ndsi_ndvi_df = aggregate_ndsi_ndvi_area_data(df_NDSI, df_NDVI,
-                                                           "Surfcloudavg")
-        ndsi_ndvi_df = pd.merge(ndsi_ndvi_df, cloud_ndsi_ndvi_df)
-
     return ndsi_ndvi_df
 
 
-def merge_flow_ndsi_ndvi_df(df_features, area=False, cloud=False):
+def merge_aggregated_data(df_features, index=False,
+                          surface=False, cloud=False):
     """
-    The ndsi_ndvi_mean_df will be merged into df_features and the
-    full dataframe is returned.
+    We merge NDSI NDVI data into df_features and the
     Args:
         df_features: dataframe to merge ndsi_ndvi_df into
     """
@@ -191,21 +179,29 @@ def merge_flow_ndsi_ndvi_df(df_features, area=False, cloud=False):
                   "03403", "03404", "03410",
                   "03411", "03412", "03413",
                   "03414", "03420", "03421"]
-    df_ndsi, df_ndvi = gather_ndsi_ndvi_data(watersheds=watersheds)
-    df_ndsi_ndvi = aggregate_ndsi_ndvi_data(df_ndsi, df_ndvi,
-                                            area=area, cloud=cloud)
 
-    df_features = pd.merge(df_features, df_ndsi_ndvi, how="left")
+    df_ndsi, df_ndvi = gather_ndsi_ndvi_data(watersheds=watersheds)
+
+    if index:
+        index_df = aggregate_index_data(df_ndsi, df_ndvi)
+        df_features = pd.merge(df_features, index_df, how="left")
+
+    if surface:
+        surface_df = aggregate_area_data(df_ndsi, df_ndvi, "Surfavg")
+        df_features = pd.merge(df_features, surface_df, how="left")
+
+    if cloud:
+        cloud_df = aggregate_area_data(df_ndsi, df_ndvi, "Surfcloudavg")
+        df_features = pd.merge(df_features, cloud_df, how="left")
+
     df_features = df_features.dropna(subset=["river_flow"])
     df_features = df_features.fillna(-1, downcast="infer")
 
     return df_features
 
 
-def gather_river_flow_data(
-            lag=6, time_features=False, index_features=False,
-            index_area_features=False, index_cloud_features=False
-        ):
+def gather_data(lag=6, time_features=False, index_features=False,
+                index_surf_features=False, index_cloud_features=False):
     """
     This function returns the full preprocessed data using various arguments
     as a pd.DataFrame
@@ -229,9 +225,8 @@ def gather_river_flow_data(
 
     df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
 
-    # Add time as feature if boolean is True
+    # Add time as a feature
     if time_features:
-
         df_features = (
             df_features
             .assign(month=df_features.date.dt.month)
@@ -239,31 +234,22 @@ def gather_river_flow_data(
 
         df_features = generate_cyclical_features(df_features, "month", 12, 1)
 
+    # Add the index features if requested
+    df_features = merge_aggregated_data(df_features, index=index_features,
+                                        surface=index_surf_features,
+                                        cloud=index_cloud_features)
+
+    feat_cols = []
+
     if index_features:
-        df_features = merge_flow_ndsi_ndvi_df(df_features,
-                                              area=index_area_features,
-                                              cloud=index_cloud_features)
+        feat_cols += ["ndsi_avg", "ndvi_avg"]
+    if index_surf_features:
+        feat_cols += ["ndsi_Surfavg", "ndvi_Surfavg"]
+    if index_cloud_features:
+        feat_cols += ["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
 
-        # Convert dataset to lagged dataset
-        df_features = generate_lags(df_features, ["ndsi_avg", "ndvi_avg"], lag)
-        df_features = df_features.drop(columns=["ndsi_avg", "ndvi_avg"])
-
-        # Lag the ndsi and ndvi according to the same lag parameter and
-        # remove current month, as this cannot be used as a feature
-        if index_area_features:
-            df_features = generate_lags(df_features,
-                                        ["ndsi_Surfavg", "ndvi_Surfavg"], lag)
-            df_features = df_features.drop(
-                    columns=["ndsi_Surfavg", "ndvi_Surfavg"]
-                )
-
-        if index_cloud_features:
-            df_features = generate_lags(df_features,
-                                        ["ndsi_Surfcloudavg",
-                                         "ndvi_Surfcloudavg"], lag)
-            df_features = df_features.drop(
-                    columns=["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
-                )
+    df_features = generate_lags(df_features, feat_cols, lag)
+    df_features = df_features.drop(columns=feat_cols)
 
     return df_features
 
