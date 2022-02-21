@@ -10,7 +10,7 @@ class MLP(pl.LightningModule):
     def __init__(self, hidden_layers, name="MLP", inputs=12, outputs=1,
                  lr=1e-3, weight_decay=1e-6, loss_fn=nn.MSELoss(), lag=6,
                  scaler=None, time_features=False, index_features=False,
-                 index_area_features=False, index_cloud_features=False):
+                 index_surf_features=False, index_cloud_features=False):
         super().__init__()
 
         self.name = name
@@ -65,7 +65,7 @@ class GRU(pl.LightningModule):
                  dropout_prob, name="GRU", loss_fn=nn.MSELoss(), batch_size=1,
                  weight_decay=1e-6, lr=1e-3, lag=6, scaler=None,
                  time_features=False, index_features=False,
-                 index_area_features=False, index_cloud_features=False):
+                 index_surf_features=False, index_cloud_features=False):
         super().__init__()
 
         self.name = name

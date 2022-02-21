@@ -139,11 +139,11 @@ def get_model(args):
 
         model = models.MLP(layers, inputs=input_dim, outputs=1,
                            lr=args.lr, weight_decay=weight_decay,
-                           loss_fn=loss_fn, lag=args.lag, 
+                           loss_fn=loss_fn, lag=args.lag,
                            scaler=args.scaler_func,
                            time_features=args.time_features,
                            index_features=args.index_features,
-                           index_area_features=args.index_area_features,
+                           index_surf_features=args.index_surf_features,
                            index_cloud_features=args.index_cloud_features)
 
     elif args.model_name == "GRU":
@@ -160,7 +160,7 @@ def get_model(args):
                            scaler=args.scaler_func,
                            time_features=args.time_features,
                            index_features=args.index_features,
-                           index_area_features=args.index_area_features,
+                           index_surf_features=args.index_surf_features,
                            index_cloud_features=args.index_cloud_features)
 
     return model

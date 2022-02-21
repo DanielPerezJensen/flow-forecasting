@@ -33,11 +33,12 @@ def train(args):
     run_metrics = collections.defaultdict(list)
 
     for seed in args.seeds:
-        df_features = data.gather_river_flow_data(
+
+        df_features = data.gather_data(
                         lag=args.lag,
                         time_features=args.time_features,
                         index_features=args.index_features,
-                        index_area_features=args.index_area_features,
+                        index_surf_features=args.index_surf_features,
                         index_cloud_features=args.index_cloud_features
                     )
 
@@ -108,7 +109,7 @@ def train(args):
             "lr": args.lr,
             "time_features": args.time_features,
             "index_features": args.index_features,
-            "index_area_features": args.index_area_features,
+            "index_surf_features": args.index_surf_features,
             "index_cloud_features": args.index_cloud_features,
             "epochs": args.epochs,
             "scaler": args.scaler,
@@ -153,7 +154,7 @@ if __name__ == "__main__":
                         help="Number of epochs to train model for")
     parser.add_argument("--lr", default=1e-3, type=float,
                         help="Learning rate")
-    parser.add_argument("--scaler", default="standard", type=str,
+    parser.add_argument("--scaler", default="maxabs", type=str,
                         help="Scaler to use for the values",
                         choices=["none", "minmax", "standard",
                                  "maxabs", "robust"])
@@ -162,7 +163,7 @@ if __name__ == "__main__":
                         help="Include time as a (cyclical) feature")
     parser.add_argument("--index_features", action="store_true",
                         help="Include NDSI/NDVI as a feature")
-    parser.add_argument("--index_area_features", action="store_true",
+    parser.add_argument("--index_surf_features", action="store_true",
                         help="Include NDSI/NDVI area as a feature")
     parser.add_argument("--index_cloud_features", action="store_true",
                         help="Include NDSI/NDVI cloud cover as a feature")
