@@ -14,6 +14,7 @@ scikit-learn = "*"
 plotly = "*"
 pytorch-lightning = "*"
 wandb = "*"
+hydroeval = "*"
 
 [dev-packages]
 matplotlib = "*"

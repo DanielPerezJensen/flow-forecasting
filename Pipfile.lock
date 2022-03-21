@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "36255b2064d64280a67a33fddf69c01f34ed8d08f6c494ff4cef03ade47bd4d8"
+            "sha256": "d871a76789a266e64265cab22652a7902b9588abddc482412375259055985526"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -440,11 +440,11 @@
                 "http"
             ],
             "hashes": [
-                "sha256:0bdd519bbf4d8c9a1d893a50b5ebacc89acd0e1fe0045d2f7b0e0c1af5990edc",
-                "sha256:256e2be44e62430c9ca8dac2e480384b00a3c52aef4e2b0b7204163fdc861d37"
+                "sha256:20322c659538501f52f6caa73b08b2ff570b7e8ea30a86559721d090e473ad5c",
+                "sha256:eb9c9d9aee49d23028deefffe53e87c55d3515512c63f57e893710301001449a"
             ],
-            "markers": "python_version >= '3.6'",
-            "version": "==2022.1.0"
+            "markers": "python_version >= '3.7'",
+            "version": "==2022.2.0"
         },
         "future": {
             "hashes": [
@@ -534,6 +534,14 @@
             ],
             "markers": "python_version >= '3.6'",
             "version": "==1.44.0"
+        },
+        "hydroeval": {
+            "hashes": [
+                "sha256:1a6c0ceb5fac3cb2641a8f954ef7224337add9b9dc65b236775f56d7c868f913",
+                "sha256:522eca99468a0f2a7670232837a459cdde847d69a4c6bface98856e2e57123f5"
+            ],
+            "index": "pypi",
+            "version": "==0.1.0"
         },
         "idna": {
             "hashes": [
@@ -1427,10 +1435,10 @@
         },
         "sentry-sdk": {
             "hashes": [
-                "sha256:3817274fba2498c8ebf6b896ee98ac916c5598706340573268c07bf2bb30d831",
-                "sha256:98fd155fa5d5fec1dbabed32a1a4ae2705f1edaa5dae4e7f7b62a384ba30e759"
+                "sha256:1ab34e3851a34aeb3d1af1a0f77cec73978c4e9698e5210d050e4932953cb241",
+                "sha256:ac2a50128409d57655279817aedcb7800cace1f76b266f3dd62055d5afd6e098"
             ],
-            "version": "==1.5.5"
+            "version": "==1.5.6"
         },
         "setuptools": {
             "hashes": [
@@ -1546,11 +1554,11 @@
         },
         "testpath": {
             "hashes": [
-                "sha256:1acf7a0bcd3004ae8357409fc33751e16d37ccc650921da1094a86581ad1e417",
-                "sha256:8044f9a0bab6567fc644a3593164e872543bb44225b0e24846e2c89237937589"
+                "sha256:2f1b97e6442c02681ebe01bd84f531028a7caea1af3825000f52345c30285e0f",
+                "sha256:8ada9f80a2ac6fb0391aa7cdb1a7d11cfa8429f693eda83f74dde570fe6fa639"
             ],
             "markers": "python_version >= '3.5'",
-            "version": "==0.5.0"
+            "version": "==0.6.0"
         },
         "threadpoolctl": {
             "hashes": [

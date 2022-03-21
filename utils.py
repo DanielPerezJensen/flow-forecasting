@@ -6,6 +6,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import json
 import os
 import models
+import hydroeval as he
 
 
 def predict(model, test_loader):
@@ -81,11 +82,14 @@ def calculate_metrics(results_df):
     Args:
         results_df: dataframe containing preds and gt
     """
-    return {'mse': mean_squared_error(results_df.value,
+    return {"mse": mean_squared_error(results_df.value,
                                       results_df.prediction),
-            'rmse': mean_squared_error(results_df.value,
+            "rmse": mean_squared_error(results_df.value,
                                        results_df.prediction) ** 0.5,
-            'r2': r2_score(results_df.value, results_df.prediction)}
+            "r2": r2_score(results_df.value, results_df.prediction),
+            "NNSE": 1 / (2 - he.evaluator(he.nse,
+                                          results_df.value,
+                                          results_df.prediction))[0]}
 
 
 def load_model(ckpt_path):
