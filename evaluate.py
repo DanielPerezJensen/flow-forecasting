@@ -25,8 +25,8 @@ import utils
 import plotting
 
 
-def evaluate(version, checkpoint):
-    path = os.path.join("lightning_logs", version,
+def evaluate(run, checkpoint):
+    path = os.path.join("river-flow-prediction", run,
                         "checkpoints", checkpoint + ".ckpt")
 
     model, checkpoint = utils.load_model(path)
@@ -36,35 +36,34 @@ def evaluate(version, checkpoint):
     lag = hparams["lag"]
     time_features = hparams["time_features"]
     index_features = hparams["index_features"]
-    index_area_features = hparams["index_area_features"]
+    index_surf_features = hparams["index_surf_features"]
     index_cloud_features = hparams["index_cloud_features"]
 
     model.eval()
 
-    df_features = data.gather_river_flow_data(
+    df_features = data.gather_data(
             lag=lag,
             time_features=time_features,
             index_features=index_features,
-            index_area_features=index_area_features,
+            index_surf_features=index_surf_features,
             index_cloud_features=index_cloud_features
         )
 
-    df_train, df_val, df_test = data.split_data(df_features, 6)
+    df_train, df_val, df_test = data.split_data(df_features, lag)
     _, _, X_test_arr, _, _, y_test_arr = data.scale_data(scaler, df_train,
                                                          df_val, df_test)
 
     test_set = data.RiverFlowDataset(X_test_arr, y_test_arr)
     test_loader = DataLoader(test_set)
 
-    predictions, values = utils.predict(model, test_loader,
-                                        hparams.get("input_dim", None))
+    predictions, values = utils.predict(model, test_loader)
 
     df_results = utils.format_predictions(predictions, values, df_test,
                                           scaler=scaler)
 
     results_metrics = utils.calculate_metrics(df_results)
 
-    print("Metrics of predicted values:")
+    print("Metrics:")
     for key, val in results_metrics.items():
         print(f"{key.upper()}: {val:.3f}")
 
@@ -75,10 +74,10 @@ def evaluate(version, checkpoint):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
-    parser.add_argument("--run", default="version_0", type=str,
+    parser.add_argument("--run", default="104i5q6g", type=str,
                         help="Run Folder")
-    parser.add_argument("--checkpoint", default="epoch=9-step=4459", type=str,
-                        help="Checkpoint name")
+    parser.add_argument("--checkpoint", default="epoch=24-step=10999",
+                        type=str, help="Checkpoint name")
 
     args = parser.parse_args()
 
