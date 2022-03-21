@@ -57,7 +57,7 @@ class MLP(pl.LightningModule):
         inputs, targets = val_batch
         outputs = self(inputs)
         loss = self.loss_fn(targets, outputs)
-        self.log("val_loss", loss)
+        self.log("val_loss", loss, on_epoch=True, on_step=True)
 
 
 class GRU(pl.LightningModule):
@@ -124,18 +124,18 @@ class GRU(pl.LightningModule):
 
     def training_step(self, train_batch, batch_idx):
         inputs, targets = train_batch
-        inputs = inputs.view([self.batch_size, -1, self.input_dim])
+        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
 
         outputs = self(inputs)
 
         loss = self.loss_fn(targets, outputs)
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, on_epoch=True, on_step=True)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
         inputs, targets = val_batch
-        inputs = inputs.view([self.batch_size, -1, self.input_dim])
+        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
 
         outputs = self(inputs)
         loss = self.loss_fn(targets, outputs)
-        self.log("val_loss", loss)
+        self.log("val_loss", loss, on_epoch=True, on_step=True)
