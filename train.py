@@ -105,39 +105,6 @@ def train(args):
             plotting.plot_predictions(df_results)
             plotting.plot_ind_predictions(df_results)
 
-    if args.save_run:
-        run_data = {
-            "model_type": args.model_name,
-            "param_set": args.param_set,
-            "seeds": args.seeds,
-            "lag": args.lag,
-            "lr": args.lr,
-            "time_features": args.time_features,
-            "index_features": args.index_features,
-            "index_surf_features": args.index_surf_features,
-            "index_cloud_features": args.index_cloud_features,
-            "epochs": args.epochs,
-            "scaler": args.scaler,
-            "mse_mean": np.mean(run_metrics["mse"]),
-            "mse_std": np.std(run_metrics["mse"]),
-            "rmse_mean": np.mean(run_metrics["rmse"]),
-            "rmse_std": np.std(run_metrics["rmse"]),
-            "r2_mean": np.mean(run_metrics["r2"]),
-            "r2_std": np.std(run_metrics["r2"])
-        }
-
-        df = pd.DataFrame([run_data])
-
-        if os.path.isfile("run_metrics.csv"):
-            df_add = pd.read_csv("run_metrics.csv", index_col=0)
-            df = pd.concat([df_add, df], ignore_index=True)
-            df = df.sort_values(by=["r2_mean", "r2_std"],
-                                ascending=False, ignore_index=True)
-
-            df.to_csv("run_metrics.csv", float_format='%.3f')
-        else:
-            df.to_csv("run_metrics.csv", float_format='%.3f')
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
