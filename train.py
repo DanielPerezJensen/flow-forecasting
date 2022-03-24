@@ -62,7 +62,7 @@ def train(args):
                                   shuffle=False, num_workers=8,)
         test_loader = DataLoader(test_set, batch_size=1,
                                  shuffle=False, num_workers=8)
-        val_loader = DataLoader(val_set, batch_size=1,
+        val_loader = DataLoader(val_set, batch_size=batch_size,
                                 shuffle=False, num_workers=8)
 
         # Some general parameters that are valid for all models
@@ -79,14 +79,12 @@ def train(args):
 
         model = utils.get_model(config)
 
-        print(model)
-
         wandb_logger = WandbLogger(project="test", entity="danielperezjensen",
-                                   offline=args.wandb, config=config)
+                                   offline=args.wandb)
 
         trainer = pl.Trainer(gpus=int(args.gpu), log_every_n_steps=10,
                              max_epochs=args.epochs, logger=wandb_logger)
-        trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, test_loader)
 
         wandb.finish(quiet=True)
 
