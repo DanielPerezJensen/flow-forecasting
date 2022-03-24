@@ -26,18 +26,18 @@ import plotting
 
 
 def evaluate(run, checkpoint):
-    path = os.path.join("river-flow-prediction", run,
+    path = os.path.join("test", run,
                         "checkpoints", checkpoint + ".ckpt")
 
     model, checkpoint = utils.load_model(path)
-    hparams = checkpoint["hyper_parameters"]
-    scaler = hparams["scaler"]
+    config = checkpoint["hyper_parameters"]["config"]
+    scaler = config["scaler"]
 
-    lag = hparams["lag"]
-    time_features = hparams["time_features"]
-    index_features = hparams["index_features"]
-    index_surf_features = hparams["index_surf_features"]
-    index_cloud_features = hparams["index_cloud_features"]
+    lag = config["lag"]
+    time_features = config["time_features"]
+    index_features = config["index_features"]
+    index_surf_features = config["index_surf_features"]
+    index_cloud_features = config["index_cloud_features"]
 
     model.eval()
 
