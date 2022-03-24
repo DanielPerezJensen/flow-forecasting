@@ -4,6 +4,15 @@ This file contains various models used throughout the project
 import torch
 import pytorch_lightning as pl
 from torch import nn
+from sklearn.metrics import mean_squared_error, r2_score
+
+
+def r2_loss(output, target):
+    target_mean = torch.mean(target)
+    ss_tot = torch.sum((target - target_mean) ** 2)
+    ss_res = torch.sum((target - output) ** 2)
+    r2 = 1 - ss_res / ss_tot
+    return r2
 
 
 class MLP(pl.LightningModule):
@@ -51,6 +60,27 @@ class MLP(pl.LightningModule):
         outputs = self(inputs)
         loss = self.loss_fn(targets, outputs)
         self.log("val_loss", loss, on_epoch=True, on_step=True)
+
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
+
+    def validation_epoch_end(self, validation_step_outputs):
+        outputs, targets = [], []
+
+        for out in validation_step_outputs:
+            outputs.append(out["outputs"])
+            targets.append(out["targets"])
+
+        outputs = torch.cat(outputs).numpy()
+        targets = torch.cat(targets).numpy()
+
+        outputs = self.config["scaler"].inverse_transform(outputs)
+        targets = self.config["scaler"].inverse_transform(targets)
+
+        r2 = r2_score(targets, outputs)
+        scaled_loss = mean_squared_error(targets, outputs)
+
+        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
+        self.log("r2_scaled", r2, on_epoch=True, on_step=False)
 
 
 class GRU(pl.LightningModule):
@@ -122,5 +152,27 @@ class GRU(pl.LightningModule):
         inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
 
         outputs = self(inputs)
+
         loss = self.loss_fn(targets, outputs)
         self.log("val_loss", loss, on_epoch=True, on_step=True)
+
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
+
+    def validation_epoch_end(self, validation_step_outputs):
+        outputs, targets = [], []
+
+        for out in validation_step_outputs:
+            outputs.append(out["outputs"])
+            targets.append(out["targets"])
+
+        outputs = torch.cat(outputs).numpy()
+        targets = torch.cat(targets).numpy()
+
+        outputs = self.config["scaler"].inverse_transform(outputs)
+        targets = self.config["scaler"].inverse_transform(targets)
+
+        r2 = r2_score(targets, outputs)
+        scaled_loss = mean_squared_error(targets, outputs)
+
+        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
+        self.log("r2_scaled", r2, on_epoch=True, on_step=False)
