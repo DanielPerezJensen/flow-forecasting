@@ -70,8 +70,8 @@ class MLP(pl.LightningModule):
             outputs.append(out["outputs"])
             targets.append(out["targets"])
 
-        outputs = torch.cat(outputs).numpy()
-        targets = torch.cat(targets).numpy()
+        outputs = torch.cat(outputs).cpu().numpy()
+        targets = torch.cat(targets).cpu().numpy()
 
         outputs = self.config["scaler"].inverse_transform(outputs)
         targets = self.config["scaler"].inverse_transform(targets)
@@ -165,13 +165,14 @@ class GRU(pl.LightningModule):
             outputs.append(out["outputs"])
             targets.append(out["targets"])
 
-        outputs = torch.cat(outputs).numpy()
-        targets = torch.cat(targets).numpy()
+        outputs = torch.cat(outputs).cpu().numpy()
+        targets = torch.cat(targets).cpu().numpy()
+
+        r2 = r2_score(targets, outputs)
 
         outputs = self.config["scaler"].inverse_transform(outputs)
         targets = self.config["scaler"].inverse_transform(targets)
 
-        r2 = r2_score(targets, outputs)
         scaled_loss = mean_squared_error(targets, outputs)
 
         self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
