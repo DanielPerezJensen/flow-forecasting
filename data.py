@@ -114,17 +114,17 @@ def aggregate_area_data(df_NDSI, df_NDVI, column):
 
     # Take sum of each day and average over the months to aggregate area data
     daily_ndsi_surf_sum = df_NDSI.groupby(
-                            pd.PeriodIndex(df_NDSI.date, freq="D")
-                        )[[column]].sum()
+                            pd.Grouper(key='date', freq='M')
+                        )[[column]].sum().reset_index()
     daily_ndvi_surf_sum = df_NDVI.groupby(
-                            pd.PeriodIndex(df_NDVI.date, freq="D")
-                        )[[column]].sum()
+                            pd.Grouper(key='date', freq='M')
+                        )[[column]].sum().reset_index()
 
-    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndsi_surf_sum.index, freq="M")
+    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(
+                                pd.Grouper(key='date', freq='M')
                             )[[column]].mean()
-    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndvi_surf_sum.index, freq="M")
+    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(
+                                pd.Grouper(key='date', freq='M')
                             )[[column]].mean()
 
     surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
@@ -148,11 +148,11 @@ def aggregate_index_data(df_NDSI, df_NDVI):
     """
 
     # Take average of NDSI values for each month and aggregate
-    monthly_ndsi_mean = df_NDSI.groupby(pd.PeriodIndex(
-                            df_NDSI.date, freq="M")
+    monthly_ndsi_mean = df_NDSI.groupby(pd.Grouper(
+                            key='date', freq='M')
                         )[["avg"]].mean()
-    monthly_ndvi_mean = df_NDVI.groupby(pd.PeriodIndex(
-                            df_NDVI.date, freq="M")
+    monthly_ndvi_mean = df_NDVI.groupby(pd.Grouper(
+                            key='date', freq='M')
                         )[["avg"]].mean()
 
     # Rename columns to enable merging
