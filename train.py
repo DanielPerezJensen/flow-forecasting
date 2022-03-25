@@ -111,7 +111,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--model_name", default="MLP", type=str,
                         help="Model to be trained",
-                        choices=["GRU", "MLP"])
+                        choices=["GRU", "MLP", "LSTM"])
     parser.add_argument("--seeds", default=[52], type=int,
                         nargs="+", help="Set seeds of runs")
     parser.add_argument("--param_set", default=1, type=int,
