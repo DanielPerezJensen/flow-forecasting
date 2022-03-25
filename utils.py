@@ -63,11 +63,9 @@ def format_predictions(predictions, values, df_test, scaler=None):
     preds = np.concatenate(predictions, axis=0).ravel()
 
     df_result = pd.DataFrame(data={"value": vals, "prediction": preds},
-                             index=df_test.head(len(vals)).date)
+                             index=df_test.head(len(vals)).index)
 
     merge = pd.merge(df_result, df_test, left_index=True, right_on="date")
-    merge = merge.set_index("date")
-    merge.index = merge.index.to_timestamp()
 
     if scaler is not None:
         merge = inverse_transform(scaler, merge, [["value", "prediction"]])
