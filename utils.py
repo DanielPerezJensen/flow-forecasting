@@ -26,7 +26,8 @@ def predict(model, test_loader):
 
     for i, data in enumerate(test_loader):
         inputs, targets = data
-        if model.config["model_name"] == "GRU":
+
+        if model.config["model_name"] == "GRU" or model.config["model_name"] == "LSTM":
             inputs = inputs.view([1, -1, model.input_dim])
 
         inputs = inputs.to(model.device)
@@ -146,5 +147,12 @@ def get_model(config):
         dropout_prob = params["dropout_prob"]
 
         model = models.GRU(config, hidden_dim, layer_dim, dropout_prob)
+
+    elif config["model_name"] == "LSTM":
+        hidden_dim = params["hidden_dim"]
+        layer_dim = params["layer_dim"]
+        dropout_prob = params["dropout_prob"]
+
+        model = models.LSTM(config, hidden_dim, layer_dim, dropout_prob)
 
     return model
