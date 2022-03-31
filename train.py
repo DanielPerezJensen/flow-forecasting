@@ -135,11 +135,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--time_features", default=0, choices=[0, 1], type=int,
                         help="Include time as a (cyclical) feature")
-    parser.add_argument("--index_features", default=0, choices=[0, 1], type=int,
+    parser.add_argument("--index_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI as a feature")
-    parser.add_argument("--index_surf_features", default=0, choices=[0, 1], type=int,
+    parser.add_argument("--index_surf_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI area as a feature")
-    parser.add_argument("--index_cloud_features", default=0, choices=[0, 1], type=int,
+    parser.add_argument("--index_cloud_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI cloud cover as a feature")
 
     parser.add_argument("--save_run", action="store_true",

@@ -229,8 +229,7 @@ def gather_data(lag=6, time_features=False, index_features=False,
     new_df = pd.DataFrame(date_range, columns=["date"])
     flow_mean_df = pd.merge(new_df, flow_mean_df, how="left")
 
-    # Fill in some of the missing values
-    flow_mean_df.river_flow = flow_mean_df.river_flow.interpolate(limit=1, limit_direction="both")
+    # Fill in missing values with -1 for imputation
     flow_mean_df = flow_mean_df.fillna(-1)
 
     df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
@@ -302,7 +301,8 @@ def split_data(df_features, lag,
 
     val_df = df_features.loc[val_start: val_end]
     test_df = df_features.loc[test_start: test_end]
-    train_df = pd.concat([df_features, val_df, test_df]).drop_duplicates(keep=False)
+    train_df = pd.concat([df_features, val_df, test_df])
+    train_df = train_df.drop_duplicates(keep=False)
 
     return train_df, val_df, test_df
 

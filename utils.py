@@ -27,7 +27,7 @@ def predict(model, test_loader):
     for i, data in enumerate(test_loader):
         inputs, targets = data
 
-        if model.config["model_name"] == "GRU" or model.config["model_name"] == "LSTM":
+        if model.config["model_name"] in ["GRU", "LSTM"]:
             inputs = inputs.view([1, -1, model.input_dim])
 
         inputs = inputs.to(model.device)
