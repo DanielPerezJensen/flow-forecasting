@@ -25,8 +25,8 @@ import utils
 import plotting
 
 
-def evaluate(run, checkpoint):
-    path = os.path.join("test", run,
+def evaluate(project, run, checkpoint):
+    path = os.path.join(project, run,
                         "checkpoints", checkpoint + ".ckpt")
 
     model, checkpoint = utils.load_model(path)
@@ -74,6 +74,8 @@ def evaluate(run, checkpoint):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
+    parser.add_argument("--project", default="test", type=str,
+                        help="Wandb project folder")
     parser.add_argument("--run", default="104i5q6g", type=str,
                         help="Run Folder")
     parser.add_argument("--checkpoint", default="epoch=24-step=10999",
@@ -81,4 +83,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    evaluate(args.run, args.checkpoint)
+    evaluate(args.project, args.run, args.checkpoint)
