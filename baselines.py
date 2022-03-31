@@ -18,31 +18,32 @@ import plotting
 
 class PreviousMonthPredictor:
     def __init__(self, river_flow_data):
-        self.river_flow_data = river_flow_data
+        self.data = river_flow_data
 
     def fit(self):
-        self.date_fit = self.river_flow_data.copy()
-        self.date_fit[f"river_flow_1"] = self.river_flow_data["river_flow"].shift(1)
-        self.date_fit = self.date_fit.iloc[1:]
+        self.fit = self.data.copy()
+        self.fit[f"river_flow_1"] = self.data["river_flow"].shift(1)
+        self.fit = self.fit.iloc[1:]
 
-        self.date_fit.date = self.date_fit.date.dt.to_timestamp().dt.strftime("%Y-%m")
+        self.fit.date = self.fit.date.dt.strftime("%Y-%m")
 
     def predict(self, inp):
-        date = inp.date.to_timestamp().strftime("%Y-%m")
-        return self.date_fit.loc[self.date_fit.date == date]["river_flow_1"].iloc[0]
+        date = inp.name.strftime("%Y-%m")
+        return self.fit.loc[self.fit.date == date]["river_flow_1"].iloc[0]
 
 
 class MonthPredictor:
     def __init__(self, river_flow_data):
-        self.river_flow_data = river_flow_data
+        self.data = river_flow_data
 
     def fit(self):
-        self.river_flow_data["month"] = self.river_flow_data["date"].dt.month
-        monthly_data = self.river_flow_data.groupby("month")["river_flow"].mean()
+        self.data["month"] = self.data.index.month
+        monthly_data = self.data.groupby("month")["river_flow"].mean()
         self.month_fit = monthly_data.to_dict()
 
     def predict(self, inp):
-        month = int(inp.date.to_timestamp().strftime("%m"))
+        print(inp)
+        month = int(inp.name.strftime("%m"))
         return self.month_fit[month]
 
 
@@ -59,7 +60,7 @@ def predict_testset(model, df_test):
 
 def baseline(args):
 
-    df_features = data.gather_river_flow_data(lag=6)
+    df_features = data.gather_data(lag=6)
     df_train, df_val, df_test = data.split_data(df_features, 0)
 
     if args.baseline == "Month":
