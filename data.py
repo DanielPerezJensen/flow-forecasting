@@ -114,17 +114,17 @@ def aggregate_area_data(df_NDSI, df_NDVI, column):
 
     # Take sum of each day and average over the months to aggregate area data
     daily_ndsi_surf_sum = df_NDSI.groupby(
-                            pd.PeriodIndex(df_NDSI.date, freq="D")
-                        )[[column]].sum()
+                            pd.Grouper(key='date', freq='M')
+                        )[[column]].sum().reset_index()
     daily_ndvi_surf_sum = df_NDVI.groupby(
-                            pd.PeriodIndex(df_NDVI.date, freq="D")
-                        )[[column]].sum()
+                            pd.Grouper(key='date', freq='M')
+                        )[[column]].sum().reset_index()
 
-    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndsi_surf_sum.index, freq="M")
+    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(
+                                pd.Grouper(key='date', freq='M')
                             )[[column]].mean()
-    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(pd.PeriodIndex(
-                                daily_ndvi_surf_sum.index, freq="M")
+    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(
+                                pd.Grouper(key='date', freq='M')
                             )[[column]].mean()
 
     surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
@@ -148,11 +148,11 @@ def aggregate_index_data(df_NDSI, df_NDVI):
     """
 
     # Take average of NDSI values for each month and aggregate
-    monthly_ndsi_mean = df_NDSI.groupby(pd.PeriodIndex(
-                            df_NDSI.date, freq="M")
+    monthly_ndsi_mean = df_NDSI.groupby(pd.Grouper(
+                            key='date', freq='M')
                         )[["avg"]].mean()
-    monthly_ndvi_mean = df_NDVI.groupby(pd.PeriodIndex(
-                            df_NDVI.date, freq="M")
+    monthly_ndvi_mean = df_NDVI.groupby(pd.Grouper(
+                            key='date', freq='M')
                         )[["avg"]].mean()
 
     # Rename columns to enable merging
@@ -194,7 +194,6 @@ def merge_aggregated_data(df_features, index=False,
         cloud_df = aggregate_area_data(df_ndsi, df_ndvi, "Surfcloudavg")
         df_features = pd.merge(df_features, cloud_df, how="left")
 
-    df_features = df_features.dropna(subset=["river_flow"])
     df_features = df_features.fillna(-1, downcast="infer")
 
     return df_features
@@ -219,9 +218,19 @@ def gather_data(lag=6, time_features=False, index_features=False,
 
     # Extract average monthly river flow
     monthly_flow_data_mean = df_DGA.groupby(
-                                    pd.PeriodIndex(df_DGA['date'], freq="M")
+                                    pd.Grouper(key='date', freq='M')
                                 )['river_flow'].mean()
     flow_mean_df = monthly_flow_data_mean.reset_index()
+
+    # Gather every month from start and end date
+    start_date = flow_mean_df.date.min()
+    end_date = flow_mean_df.date.max()
+    date_range = pd.date_range(start_date, end_date, freq="M")
+    new_df = pd.DataFrame(date_range, columns=["date"])
+    flow_mean_df = pd.merge(new_df, flow_mean_df, how="left")
+
+    # Fill in missing values with -1 for imputation
+    flow_mean_df = flow_mean_df.fillna(-1)
 
     df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
 
@@ -251,6 +260,9 @@ def gather_data(lag=6, time_features=False, index_features=False,
     df_features = generate_lags(df_features, feat_cols, lag)
     df_features = df_features.drop(columns=feat_cols)
 
+    df_features.river_flow = df_features.river_flow.replace(-1, pd.NA)
+    df_features = df_features.dropna()
+
     return df_features
 
 
@@ -279,27 +291,18 @@ def split_data(df_features, lag,
     """
     # We create an offset period range off year/months we don't want in the
     # training set
+    df_features = df_features.set_index("date")
+
     offset = pd.tseries.offsets.DateOffset(months=lag)
     val_start = pd.to_datetime(str(val_year_min)) - offset
     test_start = pd.to_datetime(str(test_year_min)) - offset
     val_end = pd.to_datetime(str(val_year_max)) + offset
     test_end = pd.to_datetime(str(test_year_max)) + offset
 
-    val_idx_offset = pd.period_range(start=val_start, end=val_end, freq="M")
-    test_idx_offset = pd.period_range(start=test_start, end=test_end, freq="M")
-
-    train_df = df_features.loc[~df_features.date.isin(val_idx_offset)]
-    train_df = train_df.loc[~df_features.date.isin(test_idx_offset)]
-
-    # The offset months should not be in the test and validation set, only the
-    # ones we denote in the function
-    real_val_idx = pd.period_range(start=val_year_min, end=val_year_max,
-                                   freq="M")
-    real_test_idx = pd.period_range(start=test_year_min, end=test_year_max,
-                                    freq="M")
-
-    val_df = df_features.loc[df_features.date.isin(real_val_idx)]
-    test_df = df_features.loc[df_features.date.isin(real_test_idx)]
+    val_df = df_features.loc[val_start: val_end]
+    test_df = df_features.loc[test_start: test_end]
+    train_df = pd.concat([df_features, val_df, test_df])
+    train_df = train_df.drop_duplicates(keep=False)
 
     return train_df, val_df, test_df
 
@@ -309,10 +312,6 @@ def scale_data(scaler, train_df, val_df, test_df):
     Returns transformed data according to scaler provided,
     will return values as is if scaler is None
     """
-    train_df = train_df.drop(columns=["date"])
-    val_df = val_df.drop(columns=["date"])
-    test_df = test_df.drop(columns=["date"])
-
     X_train, y_train = feature_label_split(train_df, "river_flow")
     X_val, y_val = feature_label_split(val_df, "river_flow")
     X_test, y_test = feature_label_split(test_df, "river_flow")

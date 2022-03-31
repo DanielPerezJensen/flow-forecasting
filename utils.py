@@ -26,7 +26,8 @@ def predict(model, test_loader):
 
     for i, data in enumerate(test_loader):
         inputs, targets = data
-        if model.name == "GRU":
+
+        if model.config["model_name"] in ["GRU", "LSTM"]:
             inputs = inputs.view([1, -1, model.input_dim])
 
         inputs = inputs.to(model.device)
@@ -63,11 +64,9 @@ def format_predictions(predictions, values, df_test, scaler=None):
     preds = np.concatenate(predictions, axis=0).ravel()
 
     df_result = pd.DataFrame(data={"value": vals, "prediction": preds},
-                             index=df_test.head(len(vals)).date)
+                             index=df_test.head(len(vals)).index)
 
     merge = pd.merge(df_result, df_test, left_index=True, right_on="date")
-    merge = merge.set_index("date")
-    merge.index = merge.index.to_timestamp()
 
     if scaler is not None:
         merge = inverse_transform(scaler, merge, [["value", "prediction"]])
@@ -101,15 +100,20 @@ def load_model(ckpt_path):
         ckpt_path: str, denoting path to model
     """
     checkpoint = torch.load(ckpt_path)
-    hparams = checkpoint["hyper_parameters"]
-    model_name = hparams["name"]
+    config = checkpoint["hyper_parameters"]["config"]
+    params = load_params(config["model_name"], config["param_set"])
 
-    print(hparams)
+    if config["model_name"] == "MLP":
+        layers = params["layers"]
 
-    if model_name == "MLP":
-        model = models.MLP(**hparams)
-    elif model_name == "GRU":
-        model = models.GRU(**hparams)
+        model = models.MLP(config, layers)
+
+    elif config["model_name"] == "GRU":
+        hidden_dim = params["hidden_dim"]
+        layer_dim = params["layer_dim"]
+        dropout_prob = params["dropout_prob"]
+
+        model = models.GRU(config, hidden_dim, layer_dim, dropout_prob)
 
     model = model.load_from_checkpoint(ckpt_path)
 
@@ -128,43 +132,27 @@ def load_params(model_name, param_set):
     return data[model_name][str(param_set)]
 
 
-def get_model(args):
+def get_model(config):
 
-    params = load_params(args.model_name, args.param_set)
+    params = load_params(config["model_name"], config["param_set"])
 
-    # Load default values from args
-    input_dim = args.input_dim
-    output_dim = args.output_dim
-    loss_fn = torch.nn.MSELoss(reduction="mean")
-
-    if args.model_name == "MLP":
+    if config["model_name"] == "MLP":
         layers = params["layers"]
-        weight_decay = params["weight_decay"]
 
-        model = models.MLP(layers, inputs=input_dim, outputs=1,
-                           lr=args.lr, weight_decay=weight_decay,
-                           loss_fn=loss_fn, lag=args.lag,
-                           scaler=args.scaler_func,
-                           time_features=args.time_features,
-                           index_features=args.index_features,
-                           index_surf_features=args.index_surf_features,
-                           index_cloud_features=args.index_cloud_features)
+        model = models.MLP(config, layers)
 
-    elif args.model_name == "GRU":
-        input_dim = args.input_dim
+    elif config["model_name"] == "GRU":
         hidden_dim = params["hidden_dim"]
         layer_dim = params["layer_dim"]
         dropout_prob = params["dropout_prob"]
-        weight_decay = params["weight_decay"]
 
-        model = models.GRU(input_dim, hidden_dim, layer_dim, output_dim,
-                           dropout_prob, lr=args.lr, loss_fn=loss_fn,
-                           batch_size=args.batch_size,
-                           weight_decay=weight_decay,
-                           scaler=args.scaler_func,
-                           time_features=args.time_features,
-                           index_features=args.index_features,
-                           index_surf_features=args.index_surf_features,
-                           index_cloud_features=args.index_cloud_features)
+        model = models.GRU(config, hidden_dim, layer_dim, dropout_prob)
+
+    elif config["model_name"] == "LSTM":
+        hidden_dim = params["hidden_dim"]
+        layer_dim = params["layer_dim"]
+        dropout_prob = params["dropout_prob"]
+
+        model = models.LSTM(config, hidden_dim, layer_dim, dropout_prob)
 
     return model

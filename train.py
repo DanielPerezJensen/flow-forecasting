@@ -62,7 +62,7 @@ def train(args):
                                   shuffle=False, num_workers=8,)
         test_loader = DataLoader(test_set, batch_size=1,
                                  shuffle=False, num_workers=8)
-        val_loader = DataLoader(val_set, batch_size=1,
+        val_loader = DataLoader(val_set, batch_size=batch_size,
                                 shuffle=False, num_workers=8)
 
         # Some general parameters that are valid for all models
@@ -70,17 +70,22 @@ def train(args):
         input_dim = len(train_set[0][0])
         output_dim = 1
 
-        # Store some default params
-        setattr(args, "input_dim", len(train_set[0][0]))
-        setattr(args, "output_dim", 1)
-        setattr(args, "scaler_func", scaler)
+        # Store some default params in config
+        config = vars(args)
 
-        model = utils.get_model(args)
+        config["input_dim"] = len(train_set[0][0])
+        config["output_dim"] = 1
+        config["scaler"] = scaler
 
-        wandb_logger = WandbLogger(project="river-flow-prediction", offline=args.wandb)
-        trainer = pl.Trainer(gpus=int(args.gpu), precision="bf16",
+        model = utils.get_model(config)
+
+        wandb_logger = WandbLogger(project="test", entity="danielperezjensen",
+                                   offline=args.wandb)
+
+        trainer = pl.Trainer(gpus=int(args.gpu), log_every_n_steps=10,
                              max_epochs=args.epochs, logger=wandb_logger)
-        trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, test_loader)
+
         wandb.finish(quiet=True)
 
         # Evaluation after training
@@ -100,47 +105,14 @@ def train(args):
             plotting.plot_predictions(df_results)
             plotting.plot_ind_predictions(df_results)
 
-    if args.save_run:
-        run_data = {
-            "model_type": args.model_name,
-            "param_set": args.param_set,
-            "seeds": args.seeds,
-            "lag": args.lag,
-            "lr": args.lr,
-            "time_features": args.time_features,
-            "index_features": args.index_features,
-            "index_surf_features": args.index_surf_features,
-            "index_cloud_features": args.index_cloud_features,
-            "epochs": args.epochs,
-            "scaler": args.scaler,
-            "mse_mean": np.mean(run_metrics["mse"]),
-            "mse_std": np.std(run_metrics["mse"]),
-            "rmse_mean": np.mean(run_metrics["rmse"]),
-            "rmse_std": np.std(run_metrics["rmse"]),
-            "r2_mean": np.mean(run_metrics["r2"]),
-            "r2_std": np.std(run_metrics["r2"])
-        }
-
-        df = pd.DataFrame([run_data])
-
-        if os.path.isfile("run_metrics.csv"):
-            df_add = pd.read_csv("run_metrics.csv", index_col=0)
-            df = pd.concat([df_add, df], ignore_index=True)
-            df = df.sort_values(by=["r2_mean", "r2_std"],
-                                ascending=False, ignore_index=True)
-
-            df.to_csv("run_metrics.csv", float_format='%.3f')
-        else:
-            df.to_csv("run_metrics.csv", float_format='%.3f')
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
     parser.add_argument("--model_name", default="MLP", type=str,
                         help="Model to be trained",
-                        choices=["GRU", "MLP"])
-    parser.add_argument("--seeds", default=[52, 86, 91, 10, 73], type=int,
+                        choices=["GRU", "MLP", "LSTM"])
+    parser.add_argument("--seeds", default=[52], type=int,
                         nargs="+", help="Set seeds of runs")
     parser.add_argument("--param_set", default=1, type=int,
                         help="Choose param set from models.json")
@@ -148,24 +120,29 @@ if __name__ == "__main__":
     parser.add_argument("--lag", default=6, type=int,
                         help="time lag to use as features")
 
-    parser.add_argument("--batch_size", default=1, type=int,
+    parser.add_argument("--batch_size", default=16, type=int,
                         help="Size of batches during training")
     parser.add_argument("--epochs", default=50, type=int,
                         help="Number of epochs to train model for")
     parser.add_argument("--lr", default=1e-3, type=float,
                         help="Learning rate")
+    parser.add_argument("--weight_decay", default=1e-6, type=float,
+                        help="Weight decay")
     parser.add_argument("--scaler", default="maxabs", type=str,
                         help="Scaler to use for the values",
                         choices=["none", "minmax", "standard",
                                  "maxabs", "robust"])
 
-    parser.add_argument("--time_features", action='store_true',
+    parser.add_argument("--time_features", default=0, choices=[0, 1], type=int,
                         help="Include time as a (cyclical) feature")
-    parser.add_argument("--index_features", action="store_true",
+    parser.add_argument("--index_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI as a feature")
-    parser.add_argument("--index_surf_features", action="store_true",
+    parser.add_argument("--index_surf_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI area as a feature")
-    parser.add_argument("--index_cloud_features", action="store_true",
+    parser.add_argument("--index_cloud_features", default=0,
+                        choices=[0, 1], type=int,
                         help="Include NDSI/NDVI cloud cover as a feature")
 
     parser.add_argument("--save_run", action="store_true",

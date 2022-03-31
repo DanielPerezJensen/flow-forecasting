@@ -25,19 +25,19 @@ import utils
 import plotting
 
 
-def evaluate(run, checkpoint):
-    path = os.path.join("river-flow-prediction", run,
+def evaluate(project, run, checkpoint):
+    path = os.path.join(project, run,
                         "checkpoints", checkpoint + ".ckpt")
 
     model, checkpoint = utils.load_model(path)
-    hparams = checkpoint["hyper_parameters"]
-    scaler = hparams["scaler"]
+    config = checkpoint["hyper_parameters"]["config"]
+    scaler = config["scaler"]
 
-    lag = hparams["lag"]
-    time_features = hparams["time_features"]
-    index_features = hparams["index_features"]
-    index_surf_features = hparams["index_surf_features"]
-    index_cloud_features = hparams["index_cloud_features"]
+    lag = config["lag"]
+    time_features = config["time_features"]
+    index_features = config["index_features"]
+    index_surf_features = config["index_surf_features"]
+    index_cloud_features = config["index_cloud_features"]
 
     model.eval()
 
@@ -74,6 +74,8 @@ def evaluate(run, checkpoint):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model")
 
+    parser.add_argument("--project", default="test", type=str,
+                        help="Wandb project folder")
     parser.add_argument("--run", default="104i5q6g", type=str,
                         help="Run Folder")
     parser.add_argument("--checkpoint", default="epoch=24-step=10999",
@@ -81,4 +83,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    evaluate(args.run, args.checkpoint)
+    evaluate(args.project, args.run, args.checkpoint)
