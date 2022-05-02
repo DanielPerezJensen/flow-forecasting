@@ -9,6 +9,12 @@ from scipy.spatial import distance
 
 def edge_features(source: Tuple[float, float],
                   target: Tuple[float, float]) -> Tuple[int, float, float]:
+    """
+    function: edge_features
+
+    Calculates and returns the features edges between
+    source and target nodes, namely the distance, x and y difference.
+    """
 
     x_diff = source[0] - target[0]
     y_diff = source[1] - target[1]
@@ -19,6 +25,15 @@ def edge_features(source: Tuple[float, float],
 
 
 def preprocess_static_data() -> None:
+    """
+    function: preprocess_static_data
+
+    Preprocesses all static information relating to the nodes and edges
+    of our graph. Namely the subsubwatershed nodes, the measurement nodes,
+    the edges between subsubwatersheds, the edges between measurement nodes,
+    and the edges between subsubwatersheds and measurement nodes. These are
+    all stored to disk.
+    """
     subsub_static_data = preprocess_subsub_static_data()
     static_subsub_nodes_df, static_subsub_edges_df = subsub_static_data
 
@@ -75,7 +90,12 @@ def preprocess_static_data() -> None:
 
 
 def preprocess_subsub_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    # Load our unprocessed subsub node information
+    """
+    function: preprocess_subsub_static_data
+
+    Preprocesses the static data about subsubwatershed nodes
+    and edges between subsubwatershed nodes into properly formatted .csv files.
+    """
     unprocessed_path = os.path.join("data", "unprocessed")
     static_subsub_path = os.path.join(unprocessed_path, "Data_Static",
                                       "DataCriosphere-Watershedf.txt")
@@ -127,6 +147,12 @@ def preprocess_subsub_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def preprocess_measurement_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    function: preprocess_measurement_static_data
+
+    Preprocesses and returns the static data about measurement
+    nodes and edges between measurement nodes into formatted .csv files.
+    """
     # We hard code the measurement node information
     measurement_nodes = [["34", 6902002, 403928, 1155],
                          ["340", 6897284, 405766, 1240],
@@ -163,5 +189,40 @@ def preprocess_measurement_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     return static_measurement_nodes_df, static_msrmsr_edges_df
 
 
+def preprocess_temporal_data() -> None:
+    """
+    function: preprocess_temporal_data
+
+    Preprocesses the temporal river flow and ndsi/ndvi data into
+    properly formatted csv files and saves it to disk.
+    """
+    unprocessed_path = os.path.join("data", "unprocessed")
+    processed_path = os.path.join("data", "processed")
+
+    flow_data_folder = "Data_RiverFlow"
+    flow_data_file = "Caudales.txt"
+
+    date_columns = ["day", "month", "year", "hour"]
+
+    df = pd.read_csv(os.path.join(unprocessed_path, flow_data_folder,
+                                  flow_data_file),
+                     delimiter="\t", index_col=False,
+                     names=["station_number", "day", "month", "year", "hour",
+                            "river_height", "river_flow",
+                            "information", "origin"])
+
+    # Convert date go datetime and add as column
+    date = pd.to_datetime(dict(year=df.year, month=df.month,
+                               day=df.day, hour=df.hour))
+    df = df.drop(columns=date_columns)
+    df.insert(1, 'date', date)
+
+    # Save dataframe to disk
+    df.to_csv(os.path.join(processed_path, "raw-measurements.csv"))
+
+    # TODO: Preprocess ndsi ndvi data as well
+
+
 if __name__ == "__main__":
     preprocess_static_data()
+    preprocess_temporal_data()
