@@ -31,6 +31,7 @@ torch-sparse = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_spar
 torch-cluster = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_cluster-1.6.0-cp38-cp38-linux_x86_64.whl"}
 torch-spline-conv = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_spline_conv-1.2.1-cp38-cp38-linux_x86_64.whl"}
 torch-geometric = "*"
+mypy = "*"
 
 [dev-packages]
 
