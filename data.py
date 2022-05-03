@@ -8,12 +8,9 @@ from typing import Type, Optional, Tuple, List
 
 def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
     """
-    generate_lags
+    function: generate_lags
+
     Generates a dataframe with columns denoting lagged value up to n_lags
-    Args:
-        df: dataframe to lag
-        value: values to lag
-        n_lags: amount of rows to lag
     """
     df_n = df.copy()
 
@@ -25,6 +22,11 @@ def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
 
 
 def get_scaler(scaler: str) -> Optional[Type]:
+    """
+    function: get_scaler
+
+    Returns a scaler from a selection of 4 options, given the string name.
+    """
     if scaler == "none":
         return None
 
@@ -136,6 +138,14 @@ def load_nodes(target_variable: str = "river_flow",
                lagged_variables: List[str] = ["river_flow"],
                freq: str = "M",
                lag: int = 6) -> Tuple[List[dict], List[dict]]:
+    """
+    function: load_nodes
+
+    Loads the nodes from disks, first aggregates the measurements then returns
+    the data in the form of two lists of dictionaries with an item for each
+    date in the requested dataset. The period of these dates is defined by
+    freq.
+    """
 
     df_flow_aggregated = load_and_aggregate_flow_data(freq=freq)
 
@@ -185,7 +195,3 @@ def load_nodes(target_variable: str = "river_flow",
             })
 
     return feature_dicts, target_dicts
-
-
-if __name__ == "__main__":
-    load_nodes()
