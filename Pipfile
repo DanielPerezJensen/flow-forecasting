@@ -9,7 +9,7 @@ verify_ssl = true
 name = "downloadpytorch"
 
 [packages]
-torch = {index="downloadpytorch", version="==1.11.0+cu113"}
+torch = {index="downloadpytorch", version="==1.10.0+cu113"}
 jupyter = "*"
 pandas = "*"
 numpy = "*"
@@ -18,7 +18,7 @@ openpyxl = "*"
 tqdm = "*"
 scikit-learn = "*"
 plotly = "*"
-pytorch-lightning = "*"
+pytorch-lightning = "==1.6.0"
 wandb = "*"
 hydroeval = "*"
 networkx = "*"
@@ -26,11 +26,13 @@ pyvis = "*"
 decorator = "*"
 matplotlib = "*"
 tensorboard = "*"
-torch-scatter = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_scatter-2.0.9-cp38-cp38-linux_x86_64.whl"}
-torch-sparse = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_sparse-0.6.13-cp38-cp38-linux_x86_64.whl"}
-torch-cluster = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_cluster-1.6.0-cp38-cp38-linux_x86_64.whl"}
-torch-spline-conv = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_spline_conv-1.2.1-cp38-cp38-linux_x86_64.whl"}
+torch-scatter = {file = "https://data.pyg.org/whl/torch-1.10.0%2Bcu113/torch_scatter-2.0.9-cp38-cp38-linux_x86_64.whl"}
+torch-sparse = {file = "https://data.pyg.org/whl/torch-1.10.0%2Bcu113/torch_sparse-0.6.13-cp38-cp38-linux_x86_64.whl"}
+torch-cluster = {file = "https://data.pyg.org/whl/torch-1.10.0%2Bcu113/torch_cluster-1.6.0-cp38-cp38-linux_x86_64.whl"}
+torch-spline-conv = {file = "https://data.pyg.org/whl/torch-1.10.0%2Bcu113/torch_spline_conv-1.2.1-cp38-cp38-linux_x86_64.whl"}
 torch-geometric = "*"
+torch-geometric-temporal = "*"
+setuptools = "==59.2.0"
 mypy = "*"
 
 [dev-packages]
