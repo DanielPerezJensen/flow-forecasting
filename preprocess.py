@@ -38,7 +38,7 @@ def preprocess_static_data() -> None:
     static_subsub_nodes_df, static_subsub_edges_df = subsub_static_data
 
     measurement_static_data = preprocess_measurement_static_data()
-    static_measurement_nodes_df, static_msrmsr_edges_df = subsub_static_data
+    static_measurement_nodes_df, static_msrmsr_edges_df = measurement_static_data
 
     # Here we define edges between subsub nodes and measurement station nodes
     # Handled separately to enable different features to be added down the line
@@ -74,12 +74,17 @@ def preprocess_static_data() -> None:
     # Below we save our data into processed folder path
     processed_path = os.path.join("data", "processed")
 
-    static_subsub_nodes_df.to_csv(os.path.join(processed_path, "subsub.csv"))
-    static_measurement_nodes_df.to_csv(os.path.join(processed_path, "measurement.csv"))
+    static_subsub_nodes_df.to_csv(os.path.join(processed_path,
+                                               "subsub.csv"))
+    static_measurement_nodes_df.to_csv(os.path.join(processed_path,
+                                                    "measurement.csv"))
 
-    static_subsub_edges_df.to_csv(os.path.join(processed_path, "subsub-flows-subsub.csv"))
-    static_msrmsr_edges_df.to_csv(os.path.join(processed_path, "measurement-flows-measurement.csv"))
-    static_submsr_edges_df.to_csv(os.path.join(processed_path, "subsub-in-measurement.csv"))
+    static_subsub_edges_df.to_csv(os.path.join(processed_path,
+                                               "subsub-flows-subsub.csv"))
+    static_msrmsr_edges_df.to_csv(os.path.join(processed_path,
+                                               "measurement-flows-measurement.csv"))
+    static_submsr_edges_df.to_csv(os.path.join(processed_path,
+                                               "subsub-in-measurement.csv"))
 
     # We store the mappers as well
     subsub_path = os.path.join(processed_path, "subsub.json")
@@ -132,12 +137,12 @@ def preprocess_subsub_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     for edge in edge_list:
         source, target = edge
 
-        source = (node_feature_dict[source]["Centroid_X"],
-                  node_feature_dict[source]["Centroid_Y"])
-        target = (node_feature_dict[target]["Centroid_X"],
-                  node_feature_dict[target]["Centroid_Y"])
+        source_xy = (node_feature_dict[source]["Centroid_X"],
+                     node_feature_dict[source]["Centroid_Y"])
+        target_xy = (node_feature_dict[target]["Centroid_X"],
+                     node_feature_dict[target]["Centroid_Y"])
 
-        dist, x_diff, y_diff = edge_features(source, target)
+        dist, x_diff, y_diff = edge_features(source_xy, target_xy)
         edge_feature_list.append([source, target, dist])
 
     static_subsub_edges_df = pd.DataFrame(edge_feature_list,
@@ -175,12 +180,12 @@ def preprocess_measurement_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     for edge in edge_list:
         source, target = edge
 
-        source = (node_feature_dict[source]["Centroid_X"],
-                  node_feature_dict[source]["Centroid_Y"])
-        target = (node_feature_dict[target]["Centroid_X"],
-                  node_feature_dict[target]["Centroid_Y"])
+        source_xy = (node_feature_dict[source]["Centroid_X"],
+                     node_feature_dict[source]["Centroid_Y"])
+        target_xy = (node_feature_dict[target]["Centroid_X"],
+                     node_feature_dict[target]["Centroid_Y"])
 
-        dist, x_diff, y_diff = edge_features(source, target)
+        dist, x_diff, y_diff = edge_features(source_xy, target_xy)
         edge_feature_list.append([source, target, dist])
 
     static_msrmsr_edges_df = pd.DataFrame(edge_feature_list,
@@ -216,6 +221,14 @@ def preprocess_temporal_data() -> None:
                                day=df.day, hour=df.hour))
     df = df.drop(columns=date_columns)
     df.insert(1, 'date', date)
+
+    # We gather our mapper for the nodes so index is preserved
+    with open(os.path.join(processed_path, "measurement.json"), "r") as f:
+        nodes_mapper = json.load(f)
+
+    nodes_mapper = {int(k): v for k, v in nodes_mapper.items()}
+
+    df.station_number = df.station_number.map(nodes_mapper)
 
     # Save dataframe to disk
     df.to_csv(os.path.join(processed_path, "raw-measurements.csv"))
