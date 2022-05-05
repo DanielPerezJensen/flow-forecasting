@@ -1,24 +1,126 @@
 import numpy as np
 import pandas as pd
 import os
+import torch
+from torch_geometric.data import HeteroData, Dataset
+from torch_geometric.loader import DataLoader
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
+from sklearn.preprocessing import FunctionTransformer
 from typing import Type, Optional, Tuple, List
+
+
+class GraphRiverFlowDataset():
+    def __init__(
+                self,
+                root: str,
+                scaler_name: str = "none",
+                freq: str = "M",
+                lag: int = 6,
+                lagged_variables: Optional[List[str]] = None,
+                target_variable: str = "river_flow",
+                target_stations: Optional[List[int]] = None
+            ):
+
+        self.root = root
+        self.freq = freq
+        self.scaler_name = scaler_name
+        self.lag = lag
+
+        if lagged_variables is None:
+            self.lagged_variables = ["river_flow"]
+        else:
+            self.lagged_variables = lagged_variables
+
+        self.target_variable = target_variable
+
+        if target_stations is None:
+            self.target_stations = [0, 1, 2, 3]
+        else:
+            self.target_stations = target_stations
+
+        self.process()
+
+    def process(self):
+
+        df = load_and_aggregate_flow_data(self.freq)
+        df_lagged = generate_lags(df, self.lagged_variables, self.lag)
+
+        # Extract nodes and eddges from disk
+        measurements_feats = load_nodes_csv(os.path.join(self.root, "measurement.csv"), self.scaler_name)
+        subsubwatersheds_feats = load_nodes_csv(os.path.join(self.root, "subsub.csv"), self.scaler_name)
+
+        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(os.path.join(self.root, "measurement-flows-measurement.csv"), self.scaler_name)
+        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(os.path.join(self.root, "subsub-flows-subsub.csv"), self.scaler_name)
+        sub_in_msr, _ = load_edges_csv(os.path.join(self.root, "subsub-in-measurement.csv"), self.scaler_name)
+
+        dataset = []
+
+        unique_dates = df_lagged.date.unique()
+
+        for date in unique_dates:
+            date_df = df_lagged.loc[df_lagged.date == date].sort_values("station_number")
+
+            # Extract date features and add the static features
+            date_features = torch.from_numpy(date_df.loc[:, date_df.columns.str.match(".*_\\d")].to_numpy())
+            date_features = torch.cat([measurements_feats, date_features], dim=-1)
+
+            # Extract date targets and convert to tensor
+            date_targets_df = date_df.loc[date_df["station_number"].isin(self.target_stations)]
+            date_targets = torch.from_numpy(date_targets_df[self.target_variable].to_numpy())
+
+            data = HeteroData()
+
+            data["measurement"].x = date_features
+            data["measurement"].y = date_targets
+            data["subsub"].x = subsubwatersheds_feats
+
+            data["measurement", "flows", "measurement"].edge_index = msr_flows_msr
+            data["measurement", "flows", "measurement"].edge_label = msr_flows_msr_attr
+
+            data["subsub", "flows", "subsub"].edge_index = sub_flows_sub
+            data["subsub", "flows", "subsub"].edge_label = sub_flows_sub_attr
+
+            data["subsub", "in", "measurement"].edge_index = sub_in_msr
+
+            dataset.append(data)
+
+        self.dataset = dataset
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, idx):
+        return self.dataset[idx]
 
 
 def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
     """
     function: generate_lags
 
-    Generates a dataframe with columns denoting lagged value up to n_lags
+    Generates a dataframe with columns denoting lagged value up to n_lags,
+    does this per station number so there is no overlap between stations.
     """
-    df_n = df.copy()
+    station_numbers = df.station_number.unique()
+    frames = []
 
-    for value in values:
-        for n in range(1, n_lags + 1):
-            df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+    # Iterate over dataframes split by station number
+    for _, df_station_flow_agg in df.groupby("station_number"):
 
-    return df_n
+        # Lag each dataframe individually
+        df_n = df_station_flow_agg.copy()
+
+        for value in values:
+            for n in range(1, n_lags + 1):
+                df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+
+        frames.append(df_n)
+
+    # Impute missing values
+    df_merged_flow_agg = pd.concat(frames)
+    df_merged_flow_agg = df_merged_flow_agg.fillna(-1)
+
+    return df_merged_flow_agg
 
 
 def get_scaler(scaler: str) -> Optional[Type]:
@@ -27,17 +129,54 @@ def get_scaler(scaler: str) -> Optional[Type]:
 
     Returns a scaler from a selection of 4 options, given the string name.
     """
-    if scaler == "none":
-        return None
-
     scalers = {
-        "minmax": MinMaxScaler,
-        "standard": StandardScaler,
-        "maxabs": MaxAbsScaler,
-        "robust": RobustScaler,
+        "minmax": MinMaxScaler(),
+        "standard": StandardScaler(),
+        "maxabs": MaxAbsScaler(),
+        "robust": RobustScaler(),
+        "none": FunctionTransformer(pd.DataFrame.to_numpy)
     }
 
-    return scalers[scaler.lower()]()
+    return scalers[scaler.lower()]
+
+
+def load_nodes_csv(path, scaler_name="none", **kwargs):
+    """
+    function: load_nodes_csv
+
+    Loads nodes from provided csv and scales using scaler name.
+    Return scaled data and scaler.
+    """
+    df = pd.read_csv(path, index_col=0, **kwargs)
+
+    scaler = get_scaler(scaler_name)
+    scaler.fit(df)
+
+    x = scaler.transform(df)
+    x = torch.from_numpy(x)
+
+    return x
+
+
+def load_edges_csv(path, scaler_name="none", **kwargs):
+    df = pd.read_csv(path, index_col=0, **kwargs)
+
+    # Gather edge index as 2 dimensional tensor
+    edge_index = torch.from_numpy(df[["src", "dst"]].values.T)
+    df_attr = df.drop(["src", "dst"], axis=1)
+
+    # Only scale the edge attributes if there are features in the dataframe
+    if len(df_attr.columns) == 1:
+        scaler = get_scaler(scaler_name)
+        scaler.fit(df_attr)
+
+        edge_attr = scaler.transform(df_attr)
+        edge_attr = torch.from_numpy(edge_attr)
+
+    else:
+        edge_attr = []
+
+    return edge_index, edge_attr
 
 
 def load_and_aggregate_flow_data(freq: str = "M") -> pd.DataFrame:
@@ -86,112 +225,3 @@ def load_and_aggregate_flow_data(freq: str = "M") -> pd.DataFrame:
     df_flow_aggregated = df_flow_aggregated.fillna(-1)
 
     return df_flow_aggregated
-
-
-def load_edges() -> Tuple[dict, dict]:
-    """
-    Load the edges from disk, and convert to the format specified by
-    PyTorch Geometric Temporal. We return an edge and edge feature dictionary
-    where the keys are the specific type of edge and the value the
-    corresponding edges and features.
-    """
-    processed_path = os.path.join("data", "processed")
-
-    # Load edge data from disk
-    edges_msrmsr = pd.read_csv(os.path.join(processed_path,
-                               "measurement-flows-measurement.csv"),
-                               index_col=0)
-    edges_subsub = pd.read_csv(os.path.join(processed_path,
-                               "subsub-flows-subsub.csv"),
-                               index_col=0)
-    edges_submsr = pd.read_csv(os.path.join(processed_path,
-                               "subsub-in-measurement.csv"),
-                               index_col=0)
-
-    # Convert edges to proper format
-    edges_msrmsr_arr = edges_msrmsr[["src", "dst"]].to_numpy().T
-    edges_subsub_arr = edges_subsub[["src", "dst"]].to_numpy().T
-    edges_submsr_arr = edges_submsr[["src", "dst"]].to_numpy().T
-
-    # Gather edge features (distance in our case)
-    edge_msrmsr_feats = edges_msrmsr.distance.to_numpy()
-    edge_subsub_feats = edges_subsub.distance.to_numpy()
-    edge_submsr_feats = np.ones(len(edges_submsr))
-
-    # Create the dictionaries of the various types of edges
-    edges_dict = {
-        ("measurement", "flows", "measurement"): edges_msrmsr_arr,
-        ("sub", "flows", "sub"): edges_subsub_arr,
-        ("sub", "in", "measurement"): edges_submsr_arr
-    }
-
-    edges_feats_dict = {
-        ("measurement", "flows", "measurement"): edge_msrmsr_feats,
-        ("sub", "flows", "sub"): edge_subsub_feats,
-        ("sub", "in", "measurement"): edge_submsr_feats
-    }
-
-    return edges_dict, edges_feats_dict
-
-
-def load_nodes(target_variable: str = "river_flow",
-               lagged_variables: List[str] = ["river_flow"],
-               freq: str = "M",
-               lag: int = 6) -> Tuple[List[dict], List[dict]]:
-    """
-    function: load_nodes
-
-    Loads the nodes from disks, first aggregates the measurements then returns
-    the data in the form of two lists of dictionaries with an item for each
-    date in the requested dataset. The period of these dates is defined by
-    freq.
-    """
-
-    df_flow_aggregated = load_and_aggregate_flow_data(freq=freq)
-
-    processed_path = os.path.join("data", "processed")
-
-    # Lagging in separate dataframes negates overflow between station nubmers
-    station_dfs = []
-
-    for _, df_station_flow_agg in df_flow_aggregated.groupby("station_number"):
-        station_dfs.append(
-            generate_lags(df_station_flow_agg,
-                          lagged_variables, lag)
-            )
-
-    df_flow_agg_lagged = pd.concat(station_dfs)
-
-    # Load static features of data
-    nodes_sub = pd.read_csv(os.path.join(processed_path, "subsub.csv"),
-                            index_col=0)
-    nodes_sub_feats = nodes_sub.to_numpy()
-
-    nodes_msr = pd.read_csv(os.path.join(processed_path, "measurement.csv"),
-                            index_col=0)
-
-    nodes_msr_static_feats = nodes_msr.to_numpy()
-
-    unique_dates = df_flow_aggregated.date.unique()
-
-    target_dicts = []
-    feature_dicts = []
-
-    for date in unique_dates:
-        date_df = df_flow_agg_lagged.loc[df_flow_agg_lagged.date == date]
-        date_df = date_df.sort_values("station_number")
-
-        feature_df = date_df.loc[:, date_df.columns.str.match(".*_\\d")]
-
-        date_features = feature_df.to_numpy()
-
-        feature_dicts.append({
-                "measurement": date_features,
-                "sub": nodes_sub_feats
-            })
-
-        target_dicts.append({
-                "measurement": date_df[target_variable].values
-            })
-
-    return feature_dicts, target_dicts
