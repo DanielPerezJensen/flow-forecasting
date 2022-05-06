@@ -66,7 +66,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def test_step(self, batch, batch_idx) -> torch.Tensor:
         loss = self._shared_eval_step(batch, batch_idx)
 
-        self.log("test_loss", loss, on_epoch=True, on_step=True,
+        self.log("test_loss", loss,
                  batch_size=self.cfg.training.batch_size)
 
         return loss

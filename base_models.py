@@ -26,12 +26,14 @@ class Gate(nn.Module):
             self.convs.append(conv)
 
         self.linear = nn.ModuleDict({
-                        node_type: Linear(-1, out_channels, bias=bias) for node_type in metadata[0]
+                        node_type: Linear(-1, out_channels, bias=bias)
+                        for node_type in metadata[0]
                     })
 
         self.activation = nn.Sigmoid()
 
-    def forward(self, x_dict: dict, edge_index_dict: dict, h_dict: dict) -> dict:
+    def forward(self, x_dict: dict, edge_index_dict: dict,
+                h_dict: dict) -> dict:
         for conv in self.convs:
             out_dict = conv(x_dict, edge_index_dict)
 
@@ -60,13 +62,15 @@ class CellGate(nn.Module):
             self.convs.append(conv)
 
         self.linear = nn.ModuleDict({
-                        node_type: Linear(-1, out_channels, bias=bias) for node_type in metadata[0]
+                        node_type: Linear(-1, out_channels, bias=bias)
+                        for node_type in metadata[0]
                     })
 
         self.activation = nn.Tanh()
 
     def forward(self, x_dict: dict, edge_index_dict: dict,
-                h_dict: dict, c_dict: dict, i_dict: dict, f_dict: dict) -> None:
+                h_dict: dict, c_dict: dict,
+                i_dict: dict, f_dict: dict) -> None:
 
         for conv in self.convs:
             t_dict = conv(x_dict, edge_index_dict)
@@ -78,7 +82,8 @@ class CellGate(nn.Module):
         out_dict = {}
 
         for node_type, C in c_dict.items():
-            out_dict[node_type] = f_dict[node_type] * C + i_dict[node_type] * t_dict[node_type]
+            out_dict[node_type] = (f_dict[node_type] * C +
+                                   i_dict[node_type] * t_dict[node_type])
 
         return out_dict
 
@@ -105,13 +110,16 @@ class HeteroGLSTM(nn.Module):
         self.f_gate = Gate(hidden_channels, num_layers, metadata, bias=bias)
         self.o_gate = Gate(hidden_channels, num_layers, metadata, bias=bias)
 
-        self.c_gate = CellGate(hidden_channels, num_layers, metadata, bias=bias)
+        self.c_gate = CellGate(hidden_channels, num_layers,
+                               metadata, bias=bias)
 
     def _set_hidden_state(self, x_dict: dict, h_dict: Optional[dict]) -> dict:
         if h_dict is None:
             h_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
-                h_dict[node_type] = nn.Parameter(torch.zeros(X.shape[0], self.hidden_channels).to(X.device))
+                h_dict[node_type] = nn.Parameter(
+                    torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
+                )
 
         return h_dict
 
@@ -119,14 +127,17 @@ class HeteroGLSTM(nn.Module):
         if c_dict is None:
             c_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
-                c_dict[node_type] = nn.Parameter(torch.zeros(X.shape[0], self.hidden_channels).to(X.device))
+                c_dict[node_type] = nn.Parameter(
+                    torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
+                )
 
         return c_dict
 
     def _calculate_hidden_state(self, o_dict: dict, c_dict: dict) -> dict:
         h_dict = {}
         for node_type in o_dict.keys():
-            h_dict[node_type] = o_dict[node_type] * torch.tanh(c_dict[node_type])
+            h_dict[node_type] = (o_dict[node_type] *
+                                 torch.tanh(c_dict[node_type]))
 
         return h_dict
 
@@ -144,44 +155,11 @@ class HeteroGLSTM(nn.Module):
         i_dict = self.i_gate(x_dict, edge_index_dict, h_dict)
         f_dict = self.f_gate(x_dict, edge_index_dict, h_dict)
 
-        c_dict = self.c_gate(x_dict, edge_index_dict, h_dict, c_dict, i_dict, f_dict)
+        c_dict = self.c_gate(x_dict, edge_index_dict, h_dict,
+                             c_dict, i_dict, f_dict)
 
         o_dict = self.o_gate(x_dict, edge_index_dict, h_dict)
 
         h_dict = self._calculate_hidden_state(o_dict, c_dict)
 
         return h_dict, c_dict
-
-
-if __name__ == "__main__":
-
-    freq = "W"
-    lag = 24
-
-    processed_path = os.path.join("data", "processed")
-    dataset = data.GraphRiverFlowDataset(processed_path, freq=freq, lag=lag,
-                                         scaler_name="maxabs", process=True)
-
-    train, val, test = data.split_dataset(dataset, freq=freq, lag=lag)
-    train_loader = DataLoader(train, batch_size=1)
-    val_loader = DataLoader(val, batch_size=1)
-    test_loader = DataLoader(test, batch_size=1)
-
-    device = torch.device("cpu")
-
-    model = HeteroGLSTM(3, 64, 4, dataset[0].metadata(), bias=True)
-
-    # Dummy iteration for loading of lazy layer sizes
-    with torch.no_grad():
-        h_dict, c_dict = model(dataset[0].x_dict, dataset[0].edge_index_dict)
-
-    print(model)
-
-    model = model.to(device)
-
-    for batch in train_loader:
-        batch = batch.to(device)
-        h_dict, c_dict = model(batch.x_dict, batch.edge_index_dict)
-        print(h_dict["measurement"])
-
-        break
