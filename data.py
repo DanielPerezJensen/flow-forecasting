@@ -53,7 +53,7 @@ class GraphRiverFlowDataset():
 
     def process(self, root) -> None:
 
-        df = load_and_aggregate_flow_data(self.freq)
+        df = load_and_aggregate_flow_data(root, self.freq)
         df_lagged = generate_lags(df, self.lagged_variables, self.lag)
 
         # Extract nodes and eddges from disk
@@ -234,17 +234,16 @@ def load_edges_csv(path, scaler_name="none", **kwargs):
     return edge_index, edge_attr
 
 
-def load_and_aggregate_flow_data(freq: str = "M") -> pd.DataFrame:
+def load_and_aggregate_flow_data(root, freq: str = "M") -> pd.DataFrame:
     """
     function: load_and_aggregate_flow_data
 
     Reads river flow data and aggregates it to the frequency specified in freq.
     Return aggregated river flow data.
     """
-    processed_folder_path = os.path.join("data", "processed")
 
     # Import river flow data and only preserve datapoints after 1965
-    df_flow = pd.read_csv(os.path.join(processed_folder_path,
+    df_flow = pd.read_csv(os.path.join(root,
                                        "raw-measurements.csv"),
                           index_col=0, parse_dates=["date"])
     df_flow = df_flow.loc[df_flow["date"].dt.year >= 1965]
