@@ -15,7 +15,7 @@ import data
 @hydra.main(config_path="config", config_name="config")
 def train(cfg: DictConfig) -> None:
 
-    processed_path = os.path.join("data", "processed")
+    processed_path = os.path.join(get_original_cwd(), "data", "processed")
     dataset = data.GraphRiverFlowDataset(
                 processed_path,
                 scaler_name=cfg.data.scaler_name,
@@ -29,10 +29,12 @@ def train(cfg: DictConfig) -> None:
 
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
-                                          lag=cfg.data.lag)
+                                          lag=cfg.data.lag,
+                                          val_year_max=2006,
+                                          test_year_max=2016)
 
     train_loader = DataLoader(train, batch_size=cfg.training.batch_size,
-                              num_workers=8)
+                              num_workers=8, shuffle=True)
     val_loader = DataLoader(val, batch_size=cfg.training.batch_size,
                             num_workers=8)
     test_loader = DataLoader(test, batch_size=cfg.training.batch_size,

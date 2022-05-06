@@ -15,7 +15,7 @@ model:
   num_layers: 4
 
 training:
-  gpu: 1
+  gpu: 0
   epochs: 25
   batch_size: 32
   bias: True
