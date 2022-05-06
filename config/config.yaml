@@ -9,10 +9,16 @@ hydra:
   run:
     dir: .
 
+model:
+  hidden_channels: 32
+  n_outputs: 1
+  num_layers: 4
+
 training:
-  gpu: True
+  gpu: 1
   epochs: 25
-  batch_size: 16
+  batch_size: 32
+  bias: True
 
 data:
   scaler_name: none
@@ -20,4 +26,4 @@ data:
   lag: 24
   lagged_variables: [river_flow, river_height]
   target_variable: river_flow
-  target_stations: [0]
+  target_stations: [0, 1, 2, 3]
