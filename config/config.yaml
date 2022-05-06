@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - optimizer: adam
+  - override hydra/hydra_logging: disabled  
+  - override hydra/job_logging: disabled  
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+model:
+  hidden_channels: 32
+  n_outputs: 1
+  num_layers: 4
+
+training:
+  gpu: 0
+  epochs: 25
+  batch_size: 32
+  bias: True
+
+data:
+  scaler_name: none
+  freq: W
+  lag: 24
+  lagged_variables: [river_flow, river_height]
+  target_variable: river_flow
+  target_stations: [0, 1, 2, 3]

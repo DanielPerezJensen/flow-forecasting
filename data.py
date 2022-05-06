@@ -1,26 +1,32 @@
 import numpy as np
 import pandas as pd
 import os
+from datetime import timedelta
+from collections import OrderedDict
+
 import torch
 from torch_geometric.data import HeteroData, Dataset
 from torch_geometric.loader import DataLoader
+
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
+
 from typing import Type, Optional, Tuple, List
 
 
 class GraphRiverFlowDataset():
     def __init__(
                 self,
-                root: str,
+                root: Optional[str] = None,
                 scaler_name: str = "none",
                 freq: str = "M",
                 lag: int = 6,
                 lagged_variables: Optional[List[str]] = None,
                 target_variable: str = "river_flow",
-                target_stations: Optional[List[int]] = None
-            ):
+                target_stations: Optional[List[int]] = None,
+                process: bool = False
+            ) -> None:
 
         self.root = root
         self.freq = freq
@@ -39,11 +45,15 @@ class GraphRiverFlowDataset():
         else:
             self.target_stations = target_stations
 
-        self.process()
+        self.data_date_dict = OrderedDict()
 
-    def process(self):
+        if process:
+            assert root
+            self.process(root)
 
-        df = load_and_aggregate_flow_data(self.freq)
+    def process(self, root) -> None:
+
+        df = load_and_aggregate_flow_data(root, self.freq)
         df_lagged = generate_lags(df, self.lagged_variables, self.lag)
 
         # Extract nodes and eddges from disk
@@ -54,11 +64,11 @@ class GraphRiverFlowDataset():
         sub_flows_sub, sub_flows_sub_attr = load_edges_csv(os.path.join(self.root, "subsub-flows-subsub.csv"), self.scaler_name)
         sub_in_msr, _ = load_edges_csv(os.path.join(self.root, "subsub-in-measurement.csv"), self.scaler_name)
 
-        dataset = []
-
         unique_dates = df_lagged.date.unique()
 
         for date in unique_dates:
+            date = np.datetime64(date, "D")
+
             date_df = df_lagged.loc[df_lagged.date == date].sort_values("station_number")
 
             # Extract date features and add the static features
@@ -71,27 +81,72 @@ class GraphRiverFlowDataset():
 
             data = HeteroData()
 
-            data["measurement"].x = date_features
-            data["measurement"].y = date_targets
-            data["subsub"].x = subsubwatersheds_feats
+            data["measurement"].x = date_features.float()
+            data["measurement"].y = date_targets.float()
+            data["subsub"].x = subsubwatersheds_feats.float()
 
             data["measurement", "flows", "measurement"].edge_index = msr_flows_msr
-            data["measurement", "flows", "measurement"].edge_label = msr_flows_msr_attr
+            data["measurement", "flows", "measurement"].edge_attr = msr_flows_msr_attr.float()
 
             data["subsub", "flows", "subsub"].edge_index = sub_flows_sub
-            data["subsub", "flows", "subsub"].edge_label = sub_flows_sub_attr
+            data["subsub", "flows", "subsub"].edge_attr = sub_flows_sub_attr.float()
 
             data["subsub", "in", "measurement"].edge_index = sub_in_msr
 
-            dataset.append(data)
+            self.data_date_dict[date] = data
 
-        self.dataset = dataset
+        self.data_list = list(self.data_date_dict.values())
 
-    def __len__(self):
-        return len(self.dataset)
+    def set_data(self, date, value):
+        self.data_date_dict[date] = value
+        self.data_list = list(self.data_date_dict.values())
 
-    def __getitem__(self, idx):
-        return self.dataset[idx]
+    def get_item_by_date(self, date) -> HeteroData:
+        return self.data_date_dict[date]
+
+    def __repr__(self) -> list:
+        return repr(self.data_list)
+
+    def __len__(self) -> int:
+        return len(self.data_list)
+
+    def __getitem__(self, index) -> HeteroData:
+        return self.data_list[index]
+
+
+def split_dataset(
+            dataset: GraphRiverFlowDataset,
+            freq: str = "M", lag: int = 6,
+            val_year_min: int = 1998, val_year_max: int = 2002,
+            test_year_min: int = 2013, test_year_max: int = 2019
+        ) -> Tuple[GraphRiverFlowDataset]:
+
+    assert freq in ["W", "M"]
+
+    if freq == "M":
+        offset = pd.tseries.offsets.DateOffset(months=lag)
+    if freq == "W":
+        offset = pd.tseries.offsets.DateOffset(weeks=lag)
+
+    train_dataset = GraphRiverFlowDataset()
+    val_dataset = GraphRiverFlowDataset()
+    test_dataset = GraphRiverFlowDataset()
+
+    val_start = np.datetime64(str(val_year_min), "D") - offset
+    val_end = np.datetime64(str(val_year_max), "D") + offset
+
+    test_start = np.datetime64(str(test_year_min), "D") - offset
+    test_end = np.datetime64(str(test_year_max), "D") + offset
+
+    for date in dataset.data_date_dict:
+        if val_start <= date < val_end:
+            val_dataset.set_data(date, dataset.get_item_by_date(date))
+        elif test_start <= date < test_end:
+            test_dataset.set_data(date, dataset.get_item_by_date(date))
+        else:
+            train_dataset.set_data(date, dataset.get_item_by_date(date))
+
+    return train_dataset, val_dataset, test_dataset
 
 
 def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
@@ -179,17 +234,16 @@ def load_edges_csv(path, scaler_name="none", **kwargs):
     return edge_index, edge_attr
 
 
-def load_and_aggregate_flow_data(freq: str = "M") -> pd.DataFrame:
+def load_and_aggregate_flow_data(root, freq: str = "M") -> pd.DataFrame:
     """
     function: load_and_aggregate_flow_data
 
     Reads river flow data and aggregates it to the frequency specified in freq.
     Return aggregated river flow data.
     """
-    processed_folder_path = os.path.join("data", "processed")
 
     # Import river flow data and only preserve datapoints after 1965
-    df_flow = pd.read_csv(os.path.join(processed_folder_path,
+    df_flow = pd.read_csv(os.path.join(root,
                                        "raw-measurements.csv"),
                           index_col=0, parse_dates=["date"])
     df_flow = df_flow.loc[df_flow["date"].dt.year >= 1965]
