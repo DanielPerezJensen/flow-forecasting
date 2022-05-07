@@ -44,7 +44,9 @@ def train(cfg: DictConfig) -> None:
     data_sample = dataset[0]
     metadata = data_sample.metadata()
 
-    model = models.HeteroGLSTM_pl(cfg, metadata)
+    # scaler = train.scaler
+    scaler = dataset.scaler
+    model = models.HeteroGLSTM_pl(cfg, metadata, scaler)
 
     # Dummy pass to initialize all layers
     with torch.no_grad():

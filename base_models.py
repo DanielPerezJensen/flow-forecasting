@@ -127,7 +127,7 @@ class HeteroGLSTM(nn.Module):
     ) -> TensorDict:
 
         if h_dict is None:
-            h_dict = {}
+            h_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
                 h_dict[node_type] = nn.Parameter(
                     torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
@@ -140,7 +140,7 @@ class HeteroGLSTM(nn.Module):
     ) -> TensorDict:
 
         if c_dict is None:
-            c_dict = {}
+            c_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
                 c_dict[node_type] = nn.Parameter(
                     torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
@@ -173,11 +173,11 @@ class HeteroGLSTM(nn.Module):
         i_dict = self.i_gate(x_dict, edge_index_dict, h_dict_new)
         f_dict = self.f_gate(x_dict, edge_index_dict, h_dict_new)
 
-        c_dict = self.c_gate(x_dict, edge_index_dict, h_dict_new,
-                             c_dict_new, i_dict, f_dict)
+        c_dict_new = self.c_gate(x_dict, edge_index_dict, h_dict_new,
+                                 c_dict_new, i_dict, f_dict)
 
         o_dict = self.o_gate(x_dict, edge_index_dict, h_dict_new)
 
-        h_dict = self._calculate_hidden_state(o_dict, c_dict_new)
+        h_dict_new = self._calculate_hidden_state(o_dict, c_dict_new)
 
         return h_dict_new, c_dict_new
