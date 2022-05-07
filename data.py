@@ -12,21 +12,23 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
 
-from typing import Type, Optional, Tuple, List
+from typing import Type, Optional, Tuple, List, Union, Dict
+
+DataDateDictType = Dict[np.datetime64, HeteroData]
 
 
-class GraphRiverFlowDataset():
+class GraphFlowDataset():
     def __init__(
-                self,
-                root: Optional[str] = None,
-                scaler_name: str = "none",
-                freq: str = "M",
-                lag: int = 6,
-                lagged_variables: Optional[List[str]] = None,
-                target_variable: str = "river_flow",
-                target_stations: Optional[List[int]] = None,
-                process: bool = False
-            ) -> None:
+        self,
+        root: Optional[Union[str, os.PathLike]] = None,
+        scaler_name: str = "none",
+        freq: str = "M",
+        lag: int = 6,
+        lagged_variables: Optional[List[str]] = None,
+        target_variable: str = "river_flow",
+        target_stations: Optional[List[int]] = None,
+        process: bool = False
+    ) -> None:
 
         self.root = root
         self.freq = freq
@@ -45,13 +47,16 @@ class GraphRiverFlowDataset():
         else:
             self.target_stations = target_stations
 
-        self.data_date_dict = OrderedDict()
+        self.data_date_dict = OrderedDict()  # type: DataDateDictType
 
         if process:
             assert root
             self.process(root)
 
-    def process(self, root) -> None:
+    def process(self, root: Union[str, os.PathLike]) -> None:
+
+        if not self.root:
+            raise ValueError
 
         df = load_and_aggregate_flow_data(root, self.freq)
         df_lagged = generate_lags(df, self.lagged_variables, self.lag)
@@ -104,7 +109,7 @@ class GraphRiverFlowDataset():
     def get_item_by_date(self, date) -> HeteroData:
         return self.data_date_dict[date]
 
-    def __repr__(self) -> list:
+    def __repr__(self) -> str:
         return repr(self.data_list)
 
     def __len__(self) -> int:
@@ -115,11 +120,11 @@ class GraphRiverFlowDataset():
 
 
 def split_dataset(
-            dataset: GraphRiverFlowDataset,
-            freq: str = "M", lag: int = 6,
-            val_year_min: int = 1998, val_year_max: int = 2002,
-            test_year_min: int = 2013, test_year_max: int = 2019
-        ) -> Tuple[GraphRiverFlowDataset]:
+    dataset: GraphFlowDataset,
+    freq: str = "M", lag: int = 6,
+    val_year_min: int = 1998, val_year_max: int = 2002,
+    test_year_min: int = 2013, test_year_max: int = 2019
+) -> Tuple[GraphFlowDataset, GraphFlowDataset, GraphFlowDataset]:
 
     assert freq in ["W", "M"]
 
@@ -128,9 +133,9 @@ def split_dataset(
     if freq == "W":
         offset = pd.tseries.offsets.DateOffset(weeks=lag)
 
-    train_dataset = GraphRiverFlowDataset()
-    val_dataset = GraphRiverFlowDataset()
-    test_dataset = GraphRiverFlowDataset()
+    train_dataset = GraphFlowDataset()
+    val_dataset = GraphFlowDataset()
+    test_dataset = GraphFlowDataset()
 
     val_start = np.datetime64(str(val_year_min), "D") - offset
     val_end = np.datetime64(str(val_year_max), "D") + offset
@@ -178,7 +183,7 @@ def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
     return df_merged_flow_agg
 
 
-def get_scaler(scaler: str) -> Optional[Type]:
+def get_scaler(scaler: str) -> Type:
     """
     function: get_scaler
 
@@ -195,7 +200,10 @@ def get_scaler(scaler: str) -> Optional[Type]:
     return scalers[scaler.lower()]
 
 
-def load_nodes_csv(path, scaler_name="none", **kwargs):
+def load_nodes_csv(
+    path: Union[str, os.PathLike],
+    scaler_name: str = "none", **kwargs
+) -> torch.Tensor:
     """
     function: load_nodes_csv
 
@@ -213,7 +221,11 @@ def load_nodes_csv(path, scaler_name="none", **kwargs):
     return x
 
 
-def load_edges_csv(path, scaler_name="none", **kwargs):
+def load_edges_csv(
+    path: Union[str, os.PathLike],
+    scaler_name: str = "none",
+    **kwargs
+) -> Tuple[torch.Tensor, torch.Tensor]:
     df = pd.read_csv(path, index_col=0, **kwargs)
 
     # Gather edge index as 2 dimensional tensor
@@ -229,12 +241,15 @@ def load_edges_csv(path, scaler_name="none", **kwargs):
         edge_attr = torch.from_numpy(edge_attr)
 
     else:
-        edge_attr = []
+        edge_attr = torch.empty((0))
 
     return edge_index, edge_attr
 
 
-def load_and_aggregate_flow_data(root, freq: str = "M") -> pd.DataFrame:
+def load_and_aggregate_flow_data(
+    root: Union[str, os.PathLike],
+    freq: str = "M"
+) -> pd.DataFrame:
     """
     function: load_and_aggregate_flow_data
 
