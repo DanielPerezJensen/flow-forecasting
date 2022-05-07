@@ -71,6 +71,15 @@ class GraphFlowDataset():
 
         unique_dates = df_lagged.date.unique()
 
+        self.scaler = get_scaler(self.scaler_name)
+
+        # Scale all columns besides target and unscalable columns
+        scaled_cols = [col for col in df_lagged if col not in [self.target_variable, "date", "station_number"]]
+        df_lagged[scaled_cols] = self.scaler.fit_transform(df_lagged[scaled_cols])
+
+        # Scale target column separately as we need to inverse transform later
+        df_lagged[[self.target_variable]] = self.scaler.fit_transform(df_lagged[[self.target_variable]])
+
         for date in unique_dates:
             date = np.datetime64(date, "D")
 
@@ -294,3 +303,8 @@ def load_and_aggregate_flow_data(
     df_flow_aggregated = df_flow_aggregated.fillna(-1)
 
     return df_flow_aggregated
+
+
+if __name__ == "__main__":
+    root = os.path.join("data", "processed")
+    dataset = GraphFlowDataset(root, process=True, scaler_name="minmax")
