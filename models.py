@@ -1,21 +1,22 @@
 import torch
 import pytorch_lightning as pl
 from torch import nn
+from torch_geometric.data.batch import Batch
 from base_models import HeteroGLSTM
 from omegaconf import DictConfig, OmegaConf
 
-from typing import Any, Optional, Tuple, List
+from typing import Any, Optional, Tuple, List, Dict, Callable
+
 # Typing options
-Opt_Dict = Optional[dict]
+TensorDict = Dict[str, torch.Tensor]
 
 
 class HeteroGLSTM_pl(pl.LightningModule):
     def __init__(
-                self,
-                cfg: DictConfig,
-                metadata: Tuple[List[str], List[Tuple[str, str, str]]],
-                optimizer: torch.optim.Optimizer
-            ) -> None:
+        self,
+        cfg: DictConfig,
+        metadata: Tuple[List[str], List[Tuple[str, str, str]]],
+    ) -> None:
         super().__init__()
 
         self.model = HeteroGLSTM(cfg.model.num_layers,
@@ -26,15 +27,17 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self.activation = nn.ReLU()
         self.loss_fn = nn.MSELoss()
 
-        self.optimizer = optimizer
-
         # Store some hyperparameters
         self.cfg = cfg
 
-    def forward(self, x_dict: dict, edge_index_dict: dict,
-                h: Opt_Dict = None, c: Opt_Dict = None) -> torch.Tensor:
+    def forward(
+        self, x_dict: TensorDict, edge_index_dict: TensorDict,
+        h_dict: Optional[TensorDict] = None,
+        c_dict: Optional[TensorDict] = None
+    ) -> TensorDict:
 
-        h, c = self.model(x_dict, edge_index_dict, h_dict=h, c_dict=c)
+        h, c = self.model(x_dict, edge_index_dict,
+                          h_dict=h_dict, c_dict=c_dict)
         out = self.activation(h["measurement"])
 
         out = self.linear(out)
@@ -42,9 +45,11 @@ class HeteroGLSTM_pl(pl.LightningModule):
         return out
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
+        # Extract optimizer
+        self.optimizer = get_optimizer(self.cfg.optimizer.name)
         return self.optimizer(self.parameters(), self.cfg.optimizer.lr)
 
-    def training_step(self, batch, batch_idx) -> torch.Tensor:
+    def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         out = self(batch.x_dict, batch.edge_index_dict)
         out = out.squeeze()
 
@@ -55,7 +60,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         return loss
 
-    def validation_step(self, batch, batch_idx) -> torch.Tensor:
+    def validation_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self._shared_eval_step(batch, batch_idx)
 
         self.log("val_loss", loss, on_epoch=True, on_step=True,
@@ -63,18 +68,27 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         return loss
 
-    def test_step(self, batch, batch_idx) -> torch.Tensor:
+    def test_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         loss = self._shared_eval_step(batch, batch_idx)
 
         self.log("test_loss", loss,
                  batch_size=self.cfg.training.batch_size)
-
         return loss
 
-    def _shared_eval_step(self, batch, batch_idx) -> torch.Tensor:
+    def _shared_eval_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
         out = self(batch.x_dict, batch.edge_index_dict)
         out = out.squeeze()
 
         loss = self.loss_fn(batch.y_dict["measurement"], out)
 
         return loss
+
+
+def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
+
+    optimizer_dict = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW
+    }
+
+    return optimizer_dict[optimizer_name]

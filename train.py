@@ -16,7 +16,7 @@ import data
 def train(cfg: DictConfig) -> None:
 
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
-    dataset = data.GraphRiverFlowDataset(
+    dataset = data.GraphFlowDataset(
                 processed_path,
                 scaler_name=cfg.data.scaler_name,
                 freq=cfg.data.freq,
@@ -40,14 +40,11 @@ def train(cfg: DictConfig) -> None:
     test_loader = DataLoader(test, batch_size=cfg.training.batch_size,
                              num_workers=8)
 
-    # Extract optimizer
-    optimizer = get_optimizer("Adam")
-
     # Extract some information about the graph in our dataset
     data_sample = dataset[0]
     metadata = data_sample.metadata()
 
-    model = models.HeteroGLSTM_pl(cfg, metadata, optimizer)
+    model = models.HeteroGLSTM_pl(cfg, metadata)
 
     # Dummy pass to initialize all layers
     with torch.no_grad():
@@ -60,16 +57,6 @@ def train(cfg: DictConfig) -> None:
                          deterministic=False)
     trainer.fit(model, train_loader, val_loader)
     trainer.test(model, test_loader)
-
-
-def get_optimizer(optimizer_name: str) -> torch.optim.Optimizer:
-
-    optimizer_dict = {
-        "Adam": torch.optim.Adam,
-        "AdamW": torch.optim.AdamW
-    }
-
-    return optimizer_dict[optimizer_name]
 
 
 if __name__ == "__main__":

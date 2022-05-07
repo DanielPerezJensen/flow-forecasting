@@ -5,12 +5,17 @@ import os
 from torch_geometric.nn import HeteroConv, SAGEConv, HGTConv, Linear
 from torch_geometric.loader import DataLoader
 
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict
+
+# Typing options
+TensorDict = Dict[str, torch.Tensor]
 
 
 class Gate(nn.Module):
-    def __init__(self, out_channels: int, num_layers: int,
-                 metadata: tuple, bias=True):
+    def __init__(
+        self, out_channels: int, num_layers: int,
+        metadata: tuple, bias: bool = True
+    ):
         super().__init__()
 
         self.convs = nn.ModuleList()
@@ -32,8 +37,9 @@ class Gate(nn.Module):
 
         self.activation = nn.Sigmoid()
 
-    def forward(self, x_dict: dict, edge_index_dict: dict,
-                h_dict: dict) -> dict:
+    def forward(
+        self, x_dict: dict, edge_index_dict: dict, h_dict: dict
+    ) -> dict:
         for conv in self.convs:
             out_dict = conv(x_dict, edge_index_dict)
 
@@ -68,9 +74,12 @@ class CellGate(nn.Module):
 
         self.activation = nn.Tanh()
 
-    def forward(self, x_dict: dict, edge_index_dict: dict,
-                h_dict: dict, c_dict: dict,
-                i_dict: dict, f_dict: dict) -> None:
+    def forward(
+        self,
+        x_dict: TensorDict, edge_index_dict: TensorDict,
+        h_dict: TensorDict, c_dict: TensorDict,
+        i_dict: TensorDict, f_dict: TensorDict
+    ) -> TensorDict:
 
         for conv in self.convs:
             t_dict = conv(x_dict, edge_index_dict)
@@ -90,12 +99,12 @@ class CellGate(nn.Module):
 
 class HeteroGLSTM(nn.Module):
     def __init__(
-            self,
-            num_layers: int,
-            hidden_channels: int,
-            out_channels: int,
-            metadata: tuple,
-            bias: bool = True
+        self,
+        num_layers: int,
+        hidden_channels: int,
+        out_channels: int,
+        metadata: tuple,
+        bias: bool = True
     ) -> None:
 
         super().__init__()
@@ -113,9 +122,12 @@ class HeteroGLSTM(nn.Module):
         self.c_gate = CellGate(hidden_channels, num_layers,
                                metadata, bias=bias)
 
-    def _set_hidden_state(self, x_dict: dict, h_dict: Optional[dict]) -> dict:
+    def _set_hidden_state(
+        self, x_dict: TensorDict, h_dict: Optional[TensorDict]
+    ) -> TensorDict:
+
         if h_dict is None:
-            h_dict = nn.ParameterDict()
+            h_dict = {}
             for node_type, X in x_dict.items():
                 h_dict[node_type] = nn.Parameter(
                     torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
@@ -123,9 +135,12 @@ class HeteroGLSTM(nn.Module):
 
         return h_dict
 
-    def _set_cell_state(self, x_dict: dict, c_dict: Optional[dict]) -> dict:
+    def _set_cell_state(
+        self, x_dict: TensorDict, c_dict: Optional[TensorDict]
+    ) -> TensorDict:
+
         if c_dict is None:
-            c_dict = nn.ParameterDict()
+            c_dict = {}
             for node_type, X in x_dict.items():
                 c_dict[node_type] = nn.Parameter(
                     torch.zeros(X.shape[0], self.hidden_channels).to(X.device)
@@ -133,7 +148,10 @@ class HeteroGLSTM(nn.Module):
 
         return c_dict
 
-    def _calculate_hidden_state(self, o_dict: dict, c_dict: dict) -> dict:
+    def _calculate_hidden_state(
+        self, o_dict: TensorDict, c_dict: TensorDict
+    ) -> TensorDict:
+
         h_dict = {}
         for node_type in o_dict.keys():
             h_dict[node_type] = (o_dict[node_type] *
@@ -142,24 +160,24 @@ class HeteroGLSTM(nn.Module):
         return h_dict
 
     def forward(
-                self,
-                x_dict: dict,
-                edge_index_dict: dict,
-                h_dict: Optional[dict] = None,
-                c_dict: Optional[dict] = None
-            ) -> Tuple[dict, dict]:
+        self,
+        x_dict: TensorDict,
+        edge_index_dict: TensorDict,
+        h_dict: Optional[TensorDict] = None,
+        c_dict: Optional[TensorDict] = None
+    ) -> Tuple[TensorDict, TensorDict]:
 
-        h_dict = self._set_hidden_state(x_dict, h_dict)
-        c_dict = self._set_cell_state(x_dict, c_dict)
+        h_dict_new = self._set_hidden_state(x_dict, h_dict)
+        c_dict_new = self._set_cell_state(x_dict, c_dict)
 
-        i_dict = self.i_gate(x_dict, edge_index_dict, h_dict)
-        f_dict = self.f_gate(x_dict, edge_index_dict, h_dict)
+        i_dict = self.i_gate(x_dict, edge_index_dict, h_dict_new)
+        f_dict = self.f_gate(x_dict, edge_index_dict, h_dict_new)
 
-        c_dict = self.c_gate(x_dict, edge_index_dict, h_dict,
-                             c_dict, i_dict, f_dict)
+        c_dict = self.c_gate(x_dict, edge_index_dict, h_dict_new,
+                             c_dict_new, i_dict, f_dict)
 
-        o_dict = self.o_gate(x_dict, edge_index_dict, h_dict)
+        o_dict = self.o_gate(x_dict, edge_index_dict, h_dict_new)
 
-        h_dict = self._calculate_hidden_state(o_dict, c_dict)
+        h_dict = self._calculate_hidden_state(o_dict, c_dict_new)
 
-        return h_dict, c_dict
+        return h_dict_new, c_dict_new
