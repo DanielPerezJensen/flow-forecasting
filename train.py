@@ -1,6 +1,8 @@
 import torch
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
@@ -11,18 +13,21 @@ import os
 import models
 import data
 
+from typing import List
+
 
 @hydra.main(config_path="config", config_name="config")
 def train(cfg: DictConfig) -> None:
 
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
     dataset = data.GraphFlowDataset(
-                processed_path,
+                root=processed_path,
+                graph_type=cfg.data.graph_type,
                 scaler_name=cfg.data.scaler_name,
                 freq=cfg.data.freq,
                 lag=cfg.data.lag,
-                lagged_variables=cfg.data.lagged_variables,
-                target_variable=cfg.data.target_variable,
+                lagged_vars=cfg.data.lagged_variables,
+                target_var=cfg.data.target_variable,
                 target_stations=cfg.data.target_stations,
                 process=True
             )
@@ -54,9 +59,20 @@ def train(cfg: DictConfig) -> None:
 
     pl.seed_everything(42, workers=True)
 
+    # Add early stopping callback if configuration calls for it
+    callbacks = []  # type: List[Callback]
+
+    if cfg.training.early_stopping:
+        early_stop_callback = EarlyStopping(monitor="val_loss_epoch",
+                                            min_delta=0.00,
+                                            patience=cfg.training.patience,
+                                            verbose=True, mode="min")
+        callbacks.extend([early_stop_callback])
+
     trainer = pl.Trainer(gpus=cfg.training.gpu,
                          max_epochs=cfg.training.epochs,
-                         deterministic=False)
+                         deterministic=False,
+                         callbacks=callbacks)
     trainer.fit(model, train_loader, val_loader)
     trainer.test(model, test_loader)
 

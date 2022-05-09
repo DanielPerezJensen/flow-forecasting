@@ -21,26 +21,26 @@ class GraphFlowDataset():
     def __init__(
         self,
         root: Optional[Union[str, os.PathLike]] = None,
+        graph_type: Optional[str] = None,
         scaler_name: str = "none",
         freq: str = "M",
         lag: int = 6,
-        lagged_variables: Optional[List[str]] = None,
-        target_variable: str = "river_flow",
+        lagged_vars: Optional[List[str]] = None,
+        target_var: str = "river_flow",
         target_stations: Optional[List[int]] = None,
         process: bool = False
     ) -> None:
 
-        self.root = root
+        self.root = root if root else os.path.join("data", "processed")
+        self.graph_type = graph_type if graph_type else "base"
+
         self.freq = freq
         self.scaler_name = scaler_name
         self.lag = lag
 
-        if lagged_variables is None:
-            self.lagged_variables = ["river_flow"]
-        else:
-            self.lagged_variables = lagged_variables
+        self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
-        self.target_variable = target_variable
+        self.target_var = target_var
 
         if target_stations is None:
             self.target_stations = [0, 1, 2, 3]
@@ -59,26 +59,26 @@ class GraphFlowDataset():
             raise ValueError
 
         df = load_and_aggregate_flow_data(root, self.freq)
-        df_lagged = generate_lags(df, self.lagged_variables, self.lag)
+        df_lagged = generate_lags(df, self.lagged_vars, self.lag)
 
         # Extract nodes and eddges from disk
-        measurements_feats = load_nodes_csv(os.path.join(self.root, "measurement.csv"), self.scaler_name)
-        subsubwatersheds_feats = load_nodes_csv(os.path.join(self.root, "subsub.csv"), self.scaler_name)
+        measurements_feats = load_nodes_csv(os.path.join(self.root, "static", "measurement.csv"), self.scaler_name)
+        subsubwatersheds_feats = load_nodes_csv(os.path.join(self.root, "static", "subsub.csv"), self.scaler_name)
 
-        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(os.path.join(self.root, "measurement-flows-measurement.csv"), self.scaler_name)
-        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(os.path.join(self.root, "subsub-flows-subsub.csv"), self.scaler_name)
-        sub_in_msr, _ = load_edges_csv(os.path.join(self.root, "subsub-in-measurement.csv"), self.scaler_name)
+        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(os.path.join(self.root, "graph", self.graph_type, "measurement-flows-measurement.csv"), self.scaler_name)
+        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(os.path.join(self.root, "graph", self.graph_type, "subsub-flows-subsub.csv"), self.scaler_name)
+        sub_in_msr, _ = load_edges_csv(os.path.join(self.root, "graph", self.graph_type, "subsub-in-measurement.csv"), self.scaler_name)
 
         unique_dates = df_lagged.date.unique()
 
         self.scaler = get_scaler(self.scaler_name)
 
         # Scale all columns besides target and unscalable columns
-        scaled_cols = [col for col in df_lagged if col not in [self.target_variable, "date", "station_number"]]
+        scaled_cols = [col for col in df_lagged if col not in [self.target_var, "date", "station_number"]]
         df_lagged[scaled_cols] = self.scaler.fit_transform(df_lagged[scaled_cols])
 
         # Scale target column separately as we need to inverse transform later
-        df_lagged[[self.target_variable]] = self.scaler.fit_transform(df_lagged[[self.target_variable]])
+        df_lagged[[self.target_var]] = self.scaler.fit_transform(df_lagged[[self.target_var]])
 
         for date in unique_dates:
             date = np.datetime64(date, "D")
@@ -91,7 +91,7 @@ class GraphFlowDataset():
 
             # Extract date targets and convert to tensor
             date_targets_df = date_df.loc[date_df["station_number"].isin(self.target_stations)]
-            date_targets = torch.from_numpy(date_targets_df[self.target_variable].to_numpy())
+            date_targets = torch.from_numpy(date_targets_df[self.target_var].to_numpy())
 
             data = HeteroData()
 
@@ -146,17 +146,27 @@ def split_dataset(
     val_dataset = GraphFlowDataset()
     test_dataset = GraphFlowDataset()
 
-    val_start = np.datetime64(str(val_year_min), "D") - offset
-    val_end = np.datetime64(str(val_year_max), "D") + offset
+    val_start = np.datetime64(str(val_year_min), "D")
+    val_end = np.datetime64(str(val_year_max), "D")
 
-    test_start = np.datetime64(str(test_year_min), "D") - offset
-    test_end = np.datetime64(str(test_year_max), "D") + offset
+    test_start = np.datetime64(str(test_year_min), "D")
+    test_end = np.datetime64(str(test_year_max), "D")
 
     for date in dataset.data_date_dict:
         if val_start <= date < val_end:
             val_dataset.set_data(date, dataset.get_item_by_date(date))
         elif test_start <= date < test_end:
             test_dataset.set_data(date, dataset.get_item_by_date(date))
+        # These dates are not allowed in the training set as
+        # they are found as features in the validation or test set
+        elif val_start - offset <= date < val_start:
+            continue
+        elif val_end <= date < val_end + offset:
+            continue
+        elif test_start - offset <= date < test_start:
+            continue
+        elif test_end <= date < test_end + offset:
+            continue
         else:
             train_dataset.set_data(date, dataset.get_item_by_date(date))
 
@@ -267,7 +277,7 @@ def load_and_aggregate_flow_data(
     """
 
     # Import river flow data and only preserve datapoints after 1965
-    df_flow = pd.read_csv(os.path.join(root,
+    df_flow = pd.read_csv(os.path.join(root, "temporal",
                                        "raw-measurements.csv"),
                           index_col=0, parse_dates=["date"])
     df_flow = df_flow.loc[df_flow["date"].dt.year >= 1965]

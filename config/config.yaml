@@ -19,9 +19,12 @@ training:
   epochs: 25
   batch_size: 32
   bias: True
+  early_stopping: False
+  patience: 5
 
 data:
   scaler_name: none
+  graph_type: base
   freq: W
   lag: 24
   lagged_variables: [river_flow, river_height]

@@ -123,8 +123,8 @@ class HeteroGLSTM(nn.Module):
                                metadata, bias=bias)
 
     def _set_hidden_state(
-        self, x_dict: TensorDict, h_dict: Optional[TensorDict]
-    ) -> TensorDict:
+        self, x_dict: TensorDict, h_dict: Optional[nn.ParameterDict]
+    ) -> nn.ParameterDict:
 
         if h_dict is None:
             h_dict = nn.ParameterDict()
@@ -136,8 +136,8 @@ class HeteroGLSTM(nn.Module):
         return h_dict
 
     def _set_cell_state(
-        self, x_dict: TensorDict, c_dict: Optional[TensorDict]
-    ) -> TensorDict:
+        self, x_dict: TensorDict, c_dict: Optional[nn.ParameterDict]
+    ) -> nn.ParameterDict:
 
         if c_dict is None:
             c_dict = nn.ParameterDict()
@@ -149,7 +149,7 @@ class HeteroGLSTM(nn.Module):
         return c_dict
 
     def _calculate_hidden_state(
-        self, o_dict: TensorDict, c_dict: TensorDict
+        self, o_dict: TensorDict, c_dict: nn.ParameterDict
     ) -> TensorDict:
 
         h_dict = {}
@@ -163,20 +163,20 @@ class HeteroGLSTM(nn.Module):
         self,
         x_dict: TensorDict,
         edge_index_dict: TensorDict,
-        h_dict: Optional[TensorDict] = None,
-        c_dict: Optional[TensorDict] = None
+        h_dict: Optional[nn.ParameterDict] = None,
+        c_dict: Optional[nn.ParameterDict] = None
     ) -> Tuple[TensorDict, TensorDict]:
 
-        h_dict_new = self._set_hidden_state(x_dict, h_dict)
-        c_dict_new = self._set_cell_state(x_dict, c_dict)
+        h_dict = self._set_hidden_state(x_dict, h_dict)
+        c_dict = self._set_cell_state(x_dict, c_dict)
 
-        i_dict = self.i_gate(x_dict, edge_index_dict, h_dict_new)
-        f_dict = self.f_gate(x_dict, edge_index_dict, h_dict_new)
+        i_dict = self.i_gate(x_dict, edge_index_dict, h_dict)
+        f_dict = self.f_gate(x_dict, edge_index_dict, h_dict)
 
-        c_dict_new = self.c_gate(x_dict, edge_index_dict, h_dict_new,
-                                 c_dict_new, i_dict, f_dict)
+        c_dict_new = self.c_gate(x_dict, edge_index_dict, h_dict,
+                                 c_dict, i_dict, f_dict)
 
-        o_dict = self.o_gate(x_dict, edge_index_dict, h_dict_new)
+        o_dict = self.o_gate(x_dict, edge_index_dict, h_dict)
 
         h_dict_new = self._calculate_hidden_state(o_dict, c_dict_new)
 
