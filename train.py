@@ -3,7 +3,10 @@ import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 
+import wandb
 import hydra
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
@@ -13,7 +16,7 @@ import os
 import models
 import data
 
-from typing import List
+from typing import List, Any, Union
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -67,14 +70,35 @@ def train(cfg: DictConfig) -> None:
                                             min_delta=0.00,
                                             patience=cfg.training.patience,
                                             verbose=True, mode="min")
-        callbacks.extend([early_stop_callback])
+        callbacks.append(early_stop_callback)
+
+    # Type definition for logger
+    logger: Union[WandbLogger, TensorBoardLogger]
+
+    # Set logger based on configuration file
+    if cfg.training.wandb.run:
+        logger = WandbLogger(save_dir=get_original_cwd(),
+                             project="graph",
+                             entity="danielperezjensen")
+        wandb_config = OmegaConf.to_container(
+            cfg, resolve=True, throw_on_missing=True
+        )
+        logger.experiment.config.update(wandb_config)
+
+        if cfg.training.wandb.watch:
+            logger.watch(model, log="all")
+    else:
+        logger = TensorBoardLogger(save_dir=get_original_cwd())
 
     trainer = pl.Trainer(gpus=cfg.training.gpu,
                          max_epochs=cfg.training.epochs,
                          deterministic=False,
+                         logger=logger,
                          callbacks=callbacks)
     trainer.fit(model, train_loader, val_loader)
     trainer.test(model, test_loader)
+
+    wandb.finish(quiet=True)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,9 @@ model:
   num_layers: 4
 
 training:
+  wandb:
+    run: True
+    watch: True
   gpu: 0
   epochs: 25
   batch_size: 32
