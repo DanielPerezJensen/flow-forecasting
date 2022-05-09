@@ -17,12 +17,13 @@ def train(cfg: DictConfig) -> None:
 
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
     dataset = data.GraphFlowDataset(
-                processed_path,
+                root=processed_path,
+                graph_type=cfg.data.graph_type,
                 scaler_name=cfg.data.scaler_name,
                 freq=cfg.data.freq,
                 lag=cfg.data.lag,
-                lagged_variables=cfg.data.lagged_variables,
-                target_variable=cfg.data.target_variable,
+                lagged_vars=cfg.data.lagged_variables,
+                target_var=cfg.data.target_variable,
                 target_stations=cfg.data.target_stations,
                 process=True
             )

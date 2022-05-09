@@ -22,6 +22,7 @@ training:
 
 data:
   scaler_name: none
+  graph_type: base
   freq: W
   lag: 24
   lagged_variables: [river_flow, river_height]

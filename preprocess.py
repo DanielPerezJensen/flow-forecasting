@@ -73,22 +73,27 @@ def preprocess_static_data() -> None:
 
     # Below we save our data into processed folder path
     processed_path = os.path.join("data", "processed")
+    os.makedirs(processed_path, exist_ok=True)
+    os.makedirs(os.path.join(processed_path, "static"), exist_ok=True)
+    os.makedirs(os.path.join(processed_path, "graph"), exist_ok=True)
+    os.makedirs(os.path.join(processed_path, "graph", "base"), exist_ok=True)
+    os.makedirs(os.path.join(processed_path, "temporal"), exist_ok=True)
 
-    static_subsub_nodes_df.to_csv(os.path.join(processed_path,
+    static_subsub_nodes_df.to_csv(os.path.join(processed_path, "static",
                                                "subsub.csv"))
-    static_measurement_nodes_df.to_csv(os.path.join(processed_path,
+    static_measurement_nodes_df.to_csv(os.path.join(processed_path, "static",
                                                     "measurement.csv"))
 
-    static_subsub_edges_df.to_csv(os.path.join(processed_path,
+    static_subsub_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
                                                "subsub-flows-subsub.csv"))
-    static_msrmsr_edges_df.to_csv(os.path.join(processed_path,
+    static_msrmsr_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
                                                "measurement-flows-measurement.csv"))
-    static_submsr_edges_df.to_csv(os.path.join(processed_path,
+    static_submsr_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
                                                "subsub-in-measurement.csv"))
 
     # We store the mappers as well
-    subsub_path = os.path.join(processed_path, "subsub.json")
-    measurement_path = os.path.join(processed_path, "measurement.json")
+    subsub_path = os.path.join(processed_path, "static", "subsub.json")
+    measurement_path = os.path.join(processed_path, "static", "measurement.json")
     with open(subsub_path, "w") as s_f, open(measurement_path, "w") as m_f:
         json.dump(s_mapper, s_f)
         json.dump(m_mapper, m_f)
@@ -223,7 +228,7 @@ def preprocess_temporal_data() -> None:
     df.insert(1, 'date', date)
 
     # We gather our mapper for the nodes so index is preserved
-    with open(os.path.join(processed_path, "measurement.json"), "r") as f:
+    with open(os.path.join(processed_path, "static", "measurement.json"), "r") as f:
         nodes_mapper = json.load(f)
 
     nodes_mapper = {int(k): v for k, v in nodes_mapper.items()}
@@ -231,7 +236,7 @@ def preprocess_temporal_data() -> None:
     df.station_number = df.station_number.map(nodes_mapper)
 
     # Save dataframe to disk
-    df.to_csv(os.path.join(processed_path, "raw-measurements.csv"))
+    df.to_csv(os.path.join(processed_path, "temporal", "raw-measurements.csv"))
 
     # TODO: Preprocess ndsi ndvi data as well
 
