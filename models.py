@@ -83,9 +83,13 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         self.log("test_loss", loss,
                  batch_size=self.cfg.training.batch_size)
+
         return loss
 
-    def validation_epoch_end(self, validation_step_outputs):
+    def validation_epoch_end(
+        self, validation_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
         outputs, targets = [], []
 
         for out in validation_step_outputs:
@@ -104,7 +108,10 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
         self.log("r2_scaled", r2, on_epoch=True, on_step=False)
 
-    def _shared_eval_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
+    def _shared_eval_step(
+        self, batch: Batch, batch_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+
         out = self(batch.x_dict, batch.edge_index_dict)
         out = out.squeeze()
         loss = self.loss_fn(batch.y_dict["measurement"], out)
