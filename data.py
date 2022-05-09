@@ -146,17 +146,27 @@ def split_dataset(
     val_dataset = GraphFlowDataset()
     test_dataset = GraphFlowDataset()
 
-    val_start = np.datetime64(str(val_year_min), "D") - offset
-    val_end = np.datetime64(str(val_year_max), "D") + offset
+    val_start = np.datetime64(str(val_year_min), "D")
+    val_end = np.datetime64(str(val_year_max), "D")
 
-    test_start = np.datetime64(str(test_year_min), "D") - offset
-    test_end = np.datetime64(str(test_year_max), "D") + offset
+    test_start = np.datetime64(str(test_year_min), "D")
+    test_end = np.datetime64(str(test_year_max), "D")
 
     for date in dataset.data_date_dict:
         if val_start <= date < val_end:
             val_dataset.set_data(date, dataset.get_item_by_date(date))
         elif test_start <= date < test_end:
             test_dataset.set_data(date, dataset.get_item_by_date(date))
+        # These dates are not allowed in the training set as
+        # they are found as features in the validation or test set
+        elif val_start - offset <= date < val_start:
+            continue
+        elif val_end <= date < val_end + offset:
+            continue
+        elif test_start - offset <= date < test_start:
+            continue
+        elif test_end <= date < test_end + offset:
+            continue
         else:
             train_dataset.set_data(date, dataset.get_item_by_date(date))
 
