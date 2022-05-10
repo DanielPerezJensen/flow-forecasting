@@ -102,27 +102,27 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def test_epoch_end(
         self, test_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
-        mse, r2 = self._shared_eval_epoch(test_step_outputs)
+        rmse, r2 = self._shared_eval_epoch(test_step_outputs)
 
-        self.log("test_mse_scaled_epoch", mse)
-        self.log("test_r2_scaled_epoch", r2)
+        self.log("test_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("test_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
-        mse, r2 = self._shared_eval_epoch(training_step_outputs)
+        rmse, r2 = self._shared_eval_epoch(training_step_outputs)
 
-        self.log("train_mse_scaled_epoch", mse)
-        self.log("train_r2_scaled_epoch", r2)
+        self.log("train_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("train_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def validation_epoch_end(
         self, validation_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        mse, r2 = self._shared_eval_epoch(validation_step_outputs)
+        rmse, r2 = self._shared_eval_epoch(validation_step_outputs)
 
-        self.log("val_mse_scaled_epoch", mse)
-        self.log("val_r2_scaled_epoch", r2)
+        self.log("val_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("val_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def _shared_eval_epoch(
         self, step_outputs: List[Dict[str, torch.Tensor]]
@@ -145,10 +145,11 @@ class HeteroGLSTM_pl(pl.LightningModule):
         descaled_outputs = self.scaler.inverse_transform(reshaped_outputs)
         descaled_targets = self.scaler.inverse_transform(reshaped_targets)
 
-        mse = mean_squared_error(descaled_targets, descaled_outputs)
+        rmse = mean_squared_error(descaled_targets, descaled_outputs,
+                                  squared=False)
         r2 = r2_score(descaled_targets, descaled_outputs)
 
-        return mse, r2
+        return rmse, r2
 
 
 def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
