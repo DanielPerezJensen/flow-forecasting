@@ -61,6 +61,9 @@ class GraphFlowDataset():
         df = load_and_aggregate_flow_data(root, self.freq)
         df_lagged = generate_lags(df, self.lagged_vars, self.lag)
 
+        # Drop any rows where target variable is nan
+        df_lagged = df_lagged.drop(df.index[df[self.target_var] == -1])
+
         # Extract nodes and eddges from disk
         measurements_feats = load_nodes_csv(os.path.join(self.root, "static", "measurement.csv"), self.scaler_name)
         subsubwatersheds_feats = load_nodes_csv(os.path.join(self.root, "static", "subsub.csv"), self.scaler_name)
@@ -317,4 +320,4 @@ def load_and_aggregate_flow_data(
 
 if __name__ == "__main__":
     root = os.path.join("data", "processed")
-    dataset = GraphFlowDataset(root, process=True, scaler_name="minmax")
+    dataset = GraphFlowDataset(root, process=True, scaler_name="minmax", freq="W")
