@@ -17,7 +17,9 @@ model:
 training:
   wandb:
     run: True
-    watch: True
+    watch: False
+    project: graph
+    entity: DanielPerezJensen
   gpu: 0
   epochs: 25
   batch_size: 32

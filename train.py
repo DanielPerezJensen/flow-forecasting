@@ -78,8 +78,8 @@ def train(cfg: DictConfig) -> None:
     # Set logger based on configuration file
     if cfg.training.wandb.run:
         logger = WandbLogger(save_dir=get_original_cwd(),
-                             project="graph",
-                             entity="danielperezjensen")
+                             project=cfg.training.wandb.project,
+                             entity=cfg.training.wandb.entity)
         wandb_config = OmegaConf.to_container(
             cfg, resolve=True, throw_on_missing=True
         )
