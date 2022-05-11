@@ -139,6 +139,8 @@ def split_dataset(
 ) -> Tuple[GraphFlowDataset, GraphFlowDataset, GraphFlowDataset]:
 
     assert freq in ["W", "M"]
+    assert val_year_min < val_year_max
+    assert test_year_min < test_year_max
 
     if freq == "M":
         offset = pd.tseries.offsets.DateOffset(months=lag)
