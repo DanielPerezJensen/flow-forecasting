@@ -6,6 +6,7 @@ from base_models import HeteroGLSTM
 from omegaconf import DictConfig, OmegaConf
 
 from sklearn.metrics import mean_squared_error, r2_score
+import numpy as np
 
 from typing import Any, Optional, Tuple, List, Dict, Callable, Type
 
@@ -23,9 +24,11 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         super().__init__()
 
+        self.metadata = metadata
+
         self.model = HeteroGLSTM(cfg.model.num_layers,
                                  cfg.model.hidden_channels,
-                                 cfg.model.n_outputs, metadata)
+                                 cfg.model.n_outputs, self.metadata)
         self.linear = nn.Linear(cfg.model.hidden_channels, cfg.model.n_outputs)
 
         self.activation = nn.ReLU()
@@ -55,91 +58,109 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self.optimizer = get_optimizer(self.cfg.optimizer.name)
         return self.optimizer(self.parameters(), self.cfg.optimizer.lr)
 
-    def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
-        out = self(batch.x_dict, batch.edge_index_dict)
-        out = out.squeeze()
+    def training_step(
+        self, batch: Batch, batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-        loss = self.loss_fn(batch.y_dict["measurement"], out)
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("train_loss", loss, on_epoch=True, on_step=True,
                  batch_size=self.cfg.training.batch_size)
 
-        return {'loss': loss, 'outputs': out,
-                'targets': batch.y_dict["measurement"]}
+        return {"loss": loss, "outputs": output, "targets": target}
+
 
     def validation_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
 
-        out, loss = self._shared_eval_step(batch, batch_idx)
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("val_loss", loss, on_epoch=True, on_step=True,
                  batch_size=self.cfg.training.batch_size)
 
-        return {'loss': loss, 'outputs': out,
-                'targets': batch.y_dict["measurement"]}
+        return {"loss": loss, "outputs": output, "targets": target}
 
-    def test_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
-        out, loss = self._shared_eval_step(batch, batch_idx)
+    def test_step(
+        self, batch: Batch, batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-        self.log("test_loss", loss,
-                 batch_size=self.cfg.training.batch_size)
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
-        return loss
+        return {"loss": loss, "outputs": output, "targets": target}
+
+    def test_epoch_end(
+        self, test_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        rmse, r2 = self._shared_eval_epoch(test_step_outputs)
+
+        self.log("test_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("test_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        outputs, targets = [], []
+        rmse, r2 = self._shared_eval_epoch(training_step_outputs)
 
-        for out in training_step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
-
-        outputs = torch.cat(outputs).detach().numpy().reshape(-1, 1)
-        targets = torch.cat(targets).detach().numpy().reshape(-1, 1)
-
-        outputs = self.scaler.inverse_transform(outputs)
-        targets = self.scaler.inverse_transform(targets)
-
-        r2 = r2_score(targets, outputs)
-        scaled_loss = mean_squared_error(targets, outputs)
-
-        self.log("train_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
-        self.log("train_r2_scaled", r2, on_epoch=True, on_step=False)
+        self.log("train_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("train_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def validation_epoch_end(
         self, validation_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        outputs, targets = [], []
+        rmse, r2 = self._shared_eval_epoch(validation_step_outputs)
 
-        for out in validation_step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
-
-        outputs = torch.cat(outputs).cpu().numpy().reshape(-1, 1)
-        targets = torch.cat(targets).cpu().numpy().reshape(-1, 1)
-
-        outputs = self.scaler.inverse_transform(outputs)
-        targets = self.scaler.inverse_transform(targets)
-
-        r2 = r2_score(targets, outputs)
-        scaled_loss = mean_squared_error(targets, outputs)
-
-        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
-        self.log("val_r2_scaled", r2, on_epoch=True, on_step=False)
+        self.log("val_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
+        self.log("val_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def _shared_eval_step(
         self, batch: Batch, batch_idx: int
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-        out = self(batch.x_dict, batch.edge_index_dict)
-        out = out.squeeze()
-        loss = self.loss_fn(batch.y_dict["measurement"], out)
+        output = self(batch.x_dict, batch.edge_index_dict)
+        target = batch.y_dict["measurement"]
 
-        return out, loss
+        n_target_stations = len(self.cfg.data.target_stations)
+
+        # Output will contain predicted outputs for all stations,
+        # but we only want the ones contained in the configuration
+        output = output.reshape(-1, 4)
+        output = output[:, self.cfg.data.target_stations]
+
+        # Targets only contain target stations,
+        # so only reshape to amount of target stations
+        target = target.reshape(-1, n_target_stations)
+
+        loss = self.loss_fn(target, output)
+
+        return loss, output, target
+
+    def _shared_eval_epoch(
+        self, step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> Tuple[float, float]:
+
+        outputs_list, targets_list = [], []
+
+        for out in step_outputs:
+            outputs_list.append(out["outputs"])
+            targets_list.append(out["targets"])
+
+        n_target_stations = len(self.cfg.data.target_stations)
+
+        np_outputs = torch.cat(outputs_list).detach().cpu().numpy()
+        np_targets = torch.cat(targets_list).detach().cpu().numpy()
+
+        descaled_outputs = self.scaler.inverse_transform(np_outputs)
+        descaled_targets = self.scaler.inverse_transform(np_targets)
+
+        rmse = mean_squared_error(descaled_targets, descaled_outputs,
+                                  squared=False)
+        r2 = r2_score(descaled_targets, descaled_outputs)
+
+        return rmse, r2
 
 
 def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:

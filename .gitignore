@@ -132,3 +132,5 @@ lightning_logs
 multirun
 wandb
 graph
+sweeps
+test
