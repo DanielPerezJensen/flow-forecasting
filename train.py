@@ -38,8 +38,10 @@ def train(cfg: DictConfig) -> None:
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
                                           lag=cfg.data.lag,
-                                          val_year_max=2006,
-                                          test_year_max=2016)
+                                          test_year_min=1999,
+                                          test_year_max=2004,
+                                          val_year_min=1974,
+                                          val_year_max=1981)
 
     train_loader = DataLoader(train, batch_size=cfg.training.batch_size,
                               num_workers=8, shuffle=True)
@@ -92,10 +94,12 @@ def train(cfg: DictConfig) -> None:
 
     trainer = pl.Trainer(gpus=cfg.training.gpu,
                          max_epochs=cfg.training.epochs,
-                         deterministic=False,
+                         deterministic=True,
                          logger=logger,
-                         callbacks=callbacks)
+                         callbacks=callbacks,
+                         log_every_n_steps=10)
     trainer.fit(model, train_loader, val_loader)
+    trainer.validate(model, val_loader)
     trainer.test(model, test_loader)
 
     wandb.finish(quiet=True)
