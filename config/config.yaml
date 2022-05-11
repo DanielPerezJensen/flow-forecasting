@@ -22,7 +22,7 @@ training:
     entity: DanielPerezJensen
   gpu: 0
   epochs: 25
-  batch_size: 32
+  batch_size: 128
   bias: True
   early_stopping: False
   patience: 5
