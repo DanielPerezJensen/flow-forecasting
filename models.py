@@ -24,9 +24,11 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         super().__init__()
 
+        self.metadata = metadata
+
         self.model = HeteroGLSTM(cfg.model.num_layers,
                                  cfg.model.hidden_channels,
-                                 cfg.model.n_outputs, metadata)
+                                 cfg.model.n_outputs, self.metadata)
         self.linear = nn.Linear(cfg.model.hidden_channels, cfg.model.n_outputs)
 
         self.activation = nn.ReLU()
@@ -59,49 +61,38 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def training_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
-        out = self(batch.x_dict, batch.edge_index_dict)
 
-        out = out.squeeze()
-
-        loss = self.loss_fn(batch.y_dict["measurement"], out)
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("train_loss", loss, on_epoch=True, on_step=True,
                  batch_size=self.cfg.training.batch_size)
 
-        return {'loss': loss, 'outputs': out,
-                'targets': batch.y_dict["measurement"]}
+        return {"loss": loss, "outputs": output, "targets": target}
+
 
     def validation_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
 
-        out = self(batch.x_dict, batch.edge_index_dict)
-
-        out = out.squeeze()
-
-        loss = self.loss_fn(batch.y_dict["measurement"], out)
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("val_loss", loss, on_epoch=True, on_step=True,
                  batch_size=self.cfg.training.batch_size)
 
-        return {'loss': loss, 'outputs': out,
-                'targets': batch.y_dict["measurement"]}
+        return {"loss": loss, "outputs": output, "targets": target}
 
     def test_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
-        out = self(batch.x_dict, batch.edge_index_dict)
 
-        out = out.squeeze()
+        loss, output, target = self._shared_eval_step(batch, batch_idx)
 
-        loss = self.loss_fn(batch.y_dict["measurement"], out)
-
-        return {'loss': loss, 'outputs': out,
-                'targets': batch.y_dict["measurement"]}
+        return {"loss": loss, "outputs": output, "targets": target}
 
     def test_epoch_end(
         self, test_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
+
         rmse, r2 = self._shared_eval_epoch(test_step_outputs)
 
         self.log("test_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
@@ -110,6 +101,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
+
         rmse, r2 = self._shared_eval_epoch(training_step_outputs)
 
         self.log("train_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
@@ -123,6 +115,28 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         self.log("val_rmse_scaled_epoch", rmse, on_step=False, on_epoch=True)
         self.log("val_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
+
+    def _shared_eval_step(
+        self, batch: Batch, batch_idx: int
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        output = self(batch.x_dict, batch.edge_index_dict)
+        target = batch.y_dict["measurement"]
+
+        n_target_stations = len(self.cfg.data.target_stations)
+
+        # Output will contain predicted outputs for all stations,
+        # but we only want the ones contained in the configuration
+        output = output.reshape(-1, 4)
+        output = output[:, self.cfg.data.target_stations]
+
+        # Targets only contain target stations,
+        # so only reshape to amount of target stations
+        target = target.reshape(-1, n_target_stations)
+
+        loss = self.loss_fn(target, output)
+
+        return loss, output, target
 
     def _shared_eval_epoch(
         self, step_outputs: List[Dict[str, torch.Tensor]]
@@ -139,11 +153,8 @@ class HeteroGLSTM_pl(pl.LightningModule):
         np_outputs = torch.cat(outputs_list).detach().cpu().numpy()
         np_targets = torch.cat(targets_list).detach().cpu().numpy()
 
-        reshaped_outputs = np_outputs.reshape(-1, n_target_stations)
-        reshaped_targets = np_targets.reshape(-1, n_target_stations)
-
-        descaled_outputs = self.scaler.inverse_transform(reshaped_outputs)
-        descaled_targets = self.scaler.inverse_transform(reshaped_targets)
+        descaled_outputs = self.scaler.inverse_transform(np_outputs)
+        descaled_targets = self.scaler.inverse_transform(np_targets)
 
         rmse = mean_squared_error(descaled_targets, descaled_outputs,
                                   squared=False)
