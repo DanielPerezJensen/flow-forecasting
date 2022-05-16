@@ -24,12 +24,9 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         super().__init__()
 
-        self.metadata = metadata
-
-        self.model = HeteroGLSTM(cfg.model.num_layers,
-                                 cfg.model.hidden_channels,
-                                 cfg.model.n_outputs, self.metadata)
-        self.linear = nn.Linear(cfg.model.hidden_channels, cfg.model.n_outputs)
+        self.model = HeteroGLSTM(cfg.model.num_layers, cfg.model.out_channels,
+                                 metadata)
+        self.linear = nn.Linear(cfg.model.out_channels, cfg.model.n_outputs)
 
         self.activation = nn.ReLU()
         self.loss_fn = nn.MSELoss()
