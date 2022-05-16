@@ -16,8 +16,22 @@ class Gate(nn.Module):
         self, out_channels: int, num_layers: int,
         metadata: tuple, bias: bool = True
     ) -> None:
-
         super().__init__()
+
+        # Initialize linear weights
+        self.linears = nn.ModuleDict({
+                        node_type: geom_nn.Linear(-1, out_channels, bias=False)
+                        for node_type in metadata[0]
+                    })
+
+        # Initialize bias weights
+        self.biases = nn.ParameterDict({
+                node_type: nn.Parameter(torch.empty(out_channels))
+                for node_type in metadata[0]
+            })
+
+        for node_type in self.biases:
+            nn.init.uniform_(self.biases[node_type])
 
         # Set up convolution layers
         self.convs = nn.ModuleList()
@@ -38,24 +52,37 @@ class Gate(nn.Module):
         self, x_dict: TensorDict, edge_index_dict: TensorDict,
         h_dict: TensorDict
     ) -> TensorDict:
+        out_dict = {node_type: self.linears[node_type](X)
+                    for node_type, X in x_dict.items()}
 
-        out_dict = x_dict
         for conv in self.convs:
             out_dict = conv(out_dict, edge_index_dict)
 
-        out_dict = {node_type: self.activation(X)
+        out_dict = {node_type: self.activation(self.biases[node_type] + X)
                     for node_type, X in out_dict.items()}
 
         return out_dict
 
 
 class CellGate(nn.Module):
-    def __init__(
-        self, out_channels: int, num_layers: int,
-        metadata: tuple, bias=True
-    ) -> None:
-
+    def __init__(self, out_channels: int, num_layers: int,
+                 metadata: tuple, bias=True) -> None:
         super().__init__()
+
+        # Initialize linear weights
+        self.linears = nn.ModuleDict({
+                        node_type: geom_nn.Linear(-1, out_channels, bias=False)
+                        for node_type in metadata[0]
+                    })
+
+        # Initialize bias weights
+        self.biases = nn.ParameterDict({
+                node_type: nn.Parameter(torch.empty(out_channels))
+                for node_type in metadata[0]
+            })
+
+        for node_type in self.biases:
+            nn.init.uniform_(self.biases[node_type])
 
         # Set up convolution layers
         self.convs = nn.ModuleList()
@@ -78,18 +105,18 @@ class CellGate(nn.Module):
         h_dict: TensorDict, c_dict: TensorDict,
         i_dict: TensorDict, f_dict: TensorDict
     ) -> TensorDict:
-
-        t_dict = x_dict
+        t_dict = {node_type: self.linears[node_type](X)
+                  for node_type, X in x_dict.items()}
 
         for conv in self.convs:
             t_dict = conv(t_dict, edge_index_dict)
 
-        t_dict = {node_type: self.activation(X)
+        t_dict = {node_type: self.activation(self.biases[node_type] + X)
                   for node_type, X in t_dict.items()}
 
-        out_dict = {node_type: f_dict[node_type] * c_dict[node_type] +
+        out_dict = {node_type: f_dict[node_type] * C +
                     i_dict[node_type] * t_dict[node_type]
-                    for node_type in c_dict}
+                    for node_type, C in c_dict.items()}
 
         return out_dict
 

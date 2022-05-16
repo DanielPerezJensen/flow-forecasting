@@ -66,7 +66,6 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         return {"loss": loss, "outputs": output, "targets": target}
 
-
     def validation_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
