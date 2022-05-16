@@ -22,6 +22,8 @@ from typing import List, Any, Union
 @hydra.main(config_path="config", config_name="config")
 def train(cfg: DictConfig) -> None:
 
+    pl.seed_everything(42, workers=True)
+
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
     dataset = data.GraphFlowDataset(
                 root=processed_path,
@@ -61,8 +63,6 @@ def train(cfg: DictConfig) -> None:
     # Dummy pass to initialize all layers
     with torch.no_grad():
         model(data_sample.x_dict, data_sample.edge_index_dict)
-
-    pl.seed_everything(42, workers=True)
 
     # Add early stopping callback if configuration calls for it
     callbacks = []  # type: List[Callback]

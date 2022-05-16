@@ -10,7 +10,7 @@ hydra:
     dir: .
 
 model:
-  hidden_channels: 32
+  out_channels: 32
   n_outputs: 1
   num_layers: 4
 
