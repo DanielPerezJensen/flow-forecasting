@@ -1,8 +1,11 @@
+from __future__ import annotations
+
 import numpy as np
 import pandas as pd
 import os
 from datetime import timedelta
 from collections import OrderedDict
+
 
 import torch
 from torch_geometric.data import HeteroData, Dataset
@@ -12,15 +15,17 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
 
-from typing import Type, Optional, Tuple, List, Union, Dict
+from typing import Type, Optional, Tuple, List, Union, Dict, Any, Callable
 
 DataDateDictType = Dict[np.datetime64, HeteroData]
+ScalerType = Union[MinMaxScaler, StandardScaler,
+                   MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
 class GraphFlowDataset():
     def __init__(
         self,
-        root: Optional[Union[str, os.PathLike]] = None,
+        root: Optional[Union[str, os.PathLike[Any]]] = None,
         graph_type: Optional[str] = None,
         scaler_name: str = "none",
         freq: str = "M",
@@ -53,7 +58,7 @@ class GraphFlowDataset():
             assert root
             self.process(root)
 
-    def process(self, root: Union[str, os.PathLike]) -> None:
+    def process(self, root: Union[str, os.PathLike[Any]]) -> None:
 
         if not self.root:
             raise ValueError
@@ -114,11 +119,11 @@ class GraphFlowDataset():
 
         self.data_list = list(self.data_date_dict.values())
 
-    def set_data(self, date, value):
+    def set_data(self, date: np.datetime64, value: HeteroData) -> None:
         self.data_date_dict[date] = value
         self.data_list = list(self.data_date_dict.values())
 
-    def get_item_by_date(self, date) -> HeteroData:
+    def get_item_by_date(self, date: np.datetime64) -> HeteroData:
         return self.data_date_dict[date]
 
     def __repr__(self) -> str:
@@ -127,7 +132,7 @@ class GraphFlowDataset():
     def __len__(self) -> int:
         return len(self.data_list)
 
-    def __getitem__(self, index) -> HeteroData:
+    def __getitem__(self, index: int) -> HeteroData:
         return self.data_list[index]
 
 
@@ -178,7 +183,9 @@ def split_dataset(
     return train_dataset, val_dataset, test_dataset
 
 
-def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
+def generate_lags(
+    df: pd.DataFrame, values: List[str], n_lags: int
+) -> pd.DataFrame:
     """
     function: generate_lags
 
@@ -207,7 +214,7 @@ def generate_lags(df: pd.DataFrame, values: list, n_lags: int) -> pd.DataFrame:
     return df_merged_flow_agg
 
 
-def get_scaler(scaler: str) -> Type:
+def get_scaler(scaler: str) -> ScalerType:
     """
     function: get_scaler
 
@@ -225,8 +232,8 @@ def get_scaler(scaler: str) -> Type:
 
 
 def load_nodes_csv(
-    path: Union[str, os.PathLike],
-    scaler_name: str = "none", **kwargs
+    path: Union[str, os.PathLike[Any]],
+    scaler_name: str = "none", **kwargs: Any
 ) -> torch.Tensor:
     """
     function: load_nodes_csv
@@ -239,16 +246,16 @@ def load_nodes_csv(
     scaler = get_scaler(scaler_name)
     scaler.fit(df)
 
-    x = scaler.transform(df)
-    x = torch.from_numpy(x)
+    np_x = scaler.transform(df)
+    tensor_x = torch.from_numpy(np_x)
 
-    return x
+    return tensor_x
 
 
 def load_edges_csv(
-    path: Union[str, os.PathLike],
+    path: Union[str, os.PathLike[Any]],
     scaler_name: str = "none",
-    **kwargs
+    **kwargs: Any
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     df = pd.read_csv(path, index_col=0, **kwargs)
 
@@ -271,7 +278,7 @@ def load_edges_csv(
 
 
 def load_and_aggregate_flow_data(
-    root: Union[str, os.PathLike],
+    root: Union[str, os.PathLike[Any]],
     freq: str = "M"
 ) -> pd.DataFrame:
     """

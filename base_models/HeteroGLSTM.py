@@ -4,17 +4,19 @@ import data
 import os
 import torch_geometric.nn as geom_nn
 from torch_geometric.loader import DataLoader
+from torch.nn.parameter import Parameter
 
-from typing import Optional, Tuple, Any, Dict
+from typing import Optional, Tuple, Any, Dict, List
 
 # Typing options
 TensorDict = Dict[str, torch.Tensor]
+MetadataType = Tuple[List[str], List[Tuple[str, str, str]]]
 
 
 class Gate(nn.Module):
     def __init__(
         self, out_channels: int, num_layers: int,
-        metadata: tuple, bias: bool = True
+        metadata: MetadataType, bias: bool = True
     ) -> None:
         super().__init__()
 
@@ -26,7 +28,7 @@ class Gate(nn.Module):
 
         # Initialize bias weights
         self.biases = nn.ParameterDict({
-                node_type: nn.Parameter(torch.empty(out_channels))
+                node_type: Parameter(torch.empty(out_channels))
                 for node_type in metadata[0]
             })
 
@@ -65,8 +67,11 @@ class Gate(nn.Module):
 
 
 class CellGate(nn.Module):
-    def __init__(self, out_channels: int, num_layers: int,
-                 metadata: tuple, bias=True) -> None:
+    def __init__(
+        self, out_channels: int, num_layers: int,
+        metadata: MetadataType, bias: bool = True
+    ) -> None:
+
         super().__init__()
 
         # Initialize linear weights
@@ -77,7 +82,7 @@ class CellGate(nn.Module):
 
         # Initialize bias weights
         self.biases = nn.ParameterDict({
-                node_type: nn.Parameter(torch.empty(out_channels))
+                node_type: Parameter(torch.empty(out_channels))
                 for node_type in metadata[0]
             })
 
@@ -126,7 +131,7 @@ class HeteroGLSTM(nn.Module):
         self,
         num_layers: int,
         out_channels: int,
-        metadata: tuple,
+        metadata: MetadataType,
         bias: bool = True
     ) -> None:
 
@@ -151,7 +156,7 @@ class HeteroGLSTM(nn.Module):
         if h_dict is None:
             h_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
-                h_dict[node_type] = nn.Parameter(
+                h_dict[node_type] = Parameter(
                     torch.zeros(X.shape[0], self.out_channels).to(X.device)
                 )
 
@@ -164,7 +169,7 @@ class HeteroGLSTM(nn.Module):
         if c_dict is None:
             c_dict = nn.ParameterDict()
             for node_type, X in x_dict.items():
-                c_dict[node_type] = nn.Parameter(
+                c_dict[node_type] = Parameter(
                     torch.zeros(X.shape[0], self.out_channels).to(X.device)
                 )
 

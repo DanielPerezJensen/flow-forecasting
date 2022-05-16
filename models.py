@@ -8,10 +8,15 @@ from omegaconf import DictConfig, OmegaConf
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
 
-from typing import Any, Optional, Tuple, List, Dict, Callable, Type
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MaxAbsScaler, RobustScaler
+from sklearn.preprocessing import FunctionTransformer
+from typing import Any, Optional, Tuple, List, Dict, Callable, Type, Union
 
 # Typing options
 TensorDict = Dict[str, torch.Tensor]
+ScalerType = Union[MinMaxScaler, StandardScaler,
+                   MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
 class HeteroGLSTM_pl(pl.LightningModule):
@@ -19,7 +24,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self,
         cfg: DictConfig,
         metadata: Tuple[List[str], List[Tuple[str, str, str]]],
-        scaler: Type
+        scaler: ScalerType
     ) -> None:
 
         super().__init__()
@@ -104,7 +109,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self.log("train_r2_scaled_epoch", r2, on_step=False, on_epoch=True)
 
     def validation_epoch_end(
-        self, validation_step_outputs: List[Dict[str, torch.Tensor]]
+        self, validation_step_outputs
     ) -> None:
 
         rmse, r2 = self._shared_eval_epoch(validation_step_outputs)
