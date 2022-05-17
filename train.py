@@ -5,10 +5,16 @@ from torch.nn import functional as F
 from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import random_split
 import pytorch_lightning as pl
+from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers import WandbLogger
+
 import wandb
 import sklearn
+import hydra
+from hydra.utils import get_original_cwd, to_absolute_path
+from omegaconf import DictConfig, OmegaConf
 
 # Data processing imports
 import pandas as pd
@@ -24,136 +30,90 @@ import argparse
 # Custom imports
 import models
 import data
-import utils
-import plotting
+
+from typing import Union, List
 
 
-def train(args):
+@hydra.main(config_path="config", config_name="config")
+def train(cfg: DictConfig) -> None:
 
-    run_metrics = collections.defaultdict(list)
-
-    for seed in args.seeds:
-
-        df_features = data.gather_data(
-                        lag=args.lag,
-                        time_features=args.time_features,
-                        index_features=args.index_features,
-                        index_surf_features=args.index_surf_features,
-                        index_cloud_features=args.index_cloud_features
-                    )
+    for seed in cfg.training.seeds:
 
         pl.seed_everything(seed, workers=True)
 
-        scaler = data.get_scaler(args.scaler)
+        processed_path = os.path.join(get_original_cwd(), "data", "processed")
 
-        # Split data and convert it to a torch.Dataset
-        df_train, df_val, df_test = data.split_data(df_features, args.lag)
-        arrays = data.scale_data(scaler, df_train, df_val, df_test)
-        X_train, X_val, X_test, y_train, y_val, y_test = arrays
+        dataset = data.RiverFlowDataset(
+                    root=processed_path,
+                    process=True,
+                    **cfg.data
+                )
 
-        train_set = data.RiverFlowDataset(X_train, y_train)
-        val_set = data.RiverFlowDataset(X_val, y_val)
-        test_set = data.RiverFlowDataset(X_test, y_test)
+        # Split dataset into training, validation and test
+        train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
+                                              lag=cfg.data.lag,
+                                              val_year_min=1999,
+                                              val_year_max=2004,
+                                              test_year_min=1974,
+                                              test_year_max=1981)
 
         # Convert Datasets to Dataloader to allow for training
-        batch_size = args.batch_size
+        batch_size = cfg.training.batch_size
 
-        train_loader = DataLoader(train_set, batch_size=batch_size,
-                                  shuffle=False, num_workers=8,)
-        test_loader = DataLoader(test_set, batch_size=1,
-                                 shuffle=False, num_workers=8)
-        val_loader = DataLoader(val_set, batch_size=batch_size,
+        train_loader = DataLoader(train, batch_size=batch_size,
+                                  shuffle=False, num_workers=8)
+        val_loader = DataLoader(val, batch_size=batch_size,
                                 shuffle=False, num_workers=8)
+        test_loader = DataLoader(test, batch_size=1,
+                                 shuffle=False, num_workers=8)
 
-        # Some general parameters that are valid for all models
-        model_name = args.model_name
-        input_dim = len(train_set[0][0])
-        output_dim = 1
+        scaler = dataset.scaler
+        sample = dataset[0]
+        input_dim = sample[0].shape[0]
+        output_dim = sample[1].shape[0]
 
-        # Store some default params in config
-        config = vars(args)
+        if cfg.model.name == "mlp":
+            model = models.MLP(input_dim, output_dim, scaler, cfg)
+        elif cfg.model.name == "gru":
+            model = models.GRU(input_dim, output_dim, scaler, cfg)
+        elif cfg.model.name == "lstm":
+            model = models.LSTM(input_dim, output_dim, scaler, cfg)
 
-        config["input_dim"] = len(train_set[0][0])
-        config["output_dim"] = 1
-        config["scaler"] = scaler
+        # Add early stopping callback if configuration calls for it
+        callbacks = []  # type: List[Callback]
 
-        model = utils.get_model(config)
+        if cfg.training.early_stopping:
+            early_stop_callback = EarlyStopping(monitor="val_loss_epoch",
+                                                min_delta=0.00,
+                                                patience=cfg.training.patience,
+                                                verbose=True, mode="min")
+            callbacks.append(early_stop_callback)
 
-        wandb_logger = WandbLogger(project="test", entity="danielperezjensen",
-                                   offline=args.wandb)
+        # Type definition for logger
+        logger: Union[WandbLogger, TensorBoardLogger]
 
-        trainer = pl.Trainer(gpus=int(args.gpu), log_every_n_steps=10,
-                             max_epochs=args.epochs, logger=wandb_logger)
-        trainer.fit(model, train_loader, test_loader)
+        # Set logger based on configuration file
+        if cfg.training.wandb.run:
+            logger = WandbLogger(save_dir=get_original_cwd(),
+                                 project=cfg.training.wandb.project,
+                                 entity=cfg.training.wandb.entity,
+                                 offline=cfg.training.wandb.offline)
+            wandb_config = OmegaConf.to_container(
+                cfg, resolve=True, throw_on_missing=True
+            )
+            logger.experiment.config.update(wandb_config)
+
+            if cfg.training.wandb.watch:
+                logger.watch(model, log="all")
+        else:
+            logger = TensorBoardLogger(save_dir=get_original_cwd())
+
+        trainer = pl.Trainer(gpus=cfg.training.gpu, log_every_n_steps=10,
+                             max_epochs=cfg.training.epochs, logger=logger)
+        trainer.fit(model, train_loader, val_loader)
 
         wandb.finish(quiet=True)
 
-        # Evaluation after training
-        predictions, values = utils.predict(model, test_loader)
-
-        df_results = utils.format_predictions(predictions, values, df_test,
-                                              scaler=scaler)
-
-        results_metrics = utils.calculate_metrics(df_results)
-
-        print("Metrics of predicted values:")
-        for key, val in results_metrics.items():
-            run_metrics[key].append(val)
-            print(f"{key.upper()}: {val:.3f}")
-
-        if args.plot:
-            plotting.plot_predictions(df_results)
-            plotting.plot_ind_predictions(df_results)
-
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train model")
-
-    parser.add_argument("--model_name", default="MLP", type=str,
-                        help="Model to be trained",
-                        choices=["GRU", "MLP", "LSTM"])
-    parser.add_argument("--seeds", default=[52], type=int,
-                        nargs="+", help="Set seeds of runs")
-    parser.add_argument("--param_set", default=1, type=int,
-                        help="Choose param set from models.json")
-
-    parser.add_argument("--lag", default=6, type=int,
-                        help="time lag to use as features")
-
-    parser.add_argument("--batch_size", default=16, type=int,
-                        help="Size of batches during training")
-    parser.add_argument("--epochs", default=50, type=int,
-                        help="Number of epochs to train model for")
-    parser.add_argument("--lr", default=1e-3, type=float,
-                        help="Learning rate")
-    parser.add_argument("--weight_decay", default=1e-6, type=float,
-                        help="Weight decay")
-    parser.add_argument("--scaler", default="maxabs", type=str,
-                        help="Scaler to use for the values",
-                        choices=["none", "minmax", "standard",
-                                 "maxabs", "robust"])
-
-    parser.add_argument("--time_features", default=0, choices=[0, 1], type=int,
-                        help="Include time as a (cyclical) feature")
-    parser.add_argument("--index_features", default=0,
-                        choices=[0, 1], type=int,
-                        help="Include NDSI/NDVI as a feature")
-    parser.add_argument("--index_surf_features", default=0,
-                        choices=[0, 1], type=int,
-                        help="Include NDSI/NDVI area as a feature")
-    parser.add_argument("--index_cloud_features", default=0,
-                        choices=[0, 1], type=int,
-                        help="Include NDSI/NDVI cloud cover as a feature")
-
-    parser.add_argument("--save_run", action="store_true",
-                        help="Save the metrics of this run to run_metrics.csv")
-    parser.add_argument("--plot", action="store_true",
-                        help="Plot the predictions of the validation set")
-    parser.add_argument("--wandb", action="store_false",
-                        help="Flag to set if you want to upload to wandb.ai")
-    parser.add_argument("--gpu", action="store_true",
-                        help="Use GPU for training")
-
-    args = parser.parse_args()
-
-    train(args)
+    train()

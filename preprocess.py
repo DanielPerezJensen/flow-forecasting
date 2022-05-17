@@ -6,7 +6,7 @@ import collections
 import os
 
 
-def main():
+def main() -> None:
 
     processed_folder_path = os.path.join("data", "processed")
     unprocessed_folder_path = os.path.join("data", "unprocessed")
@@ -35,7 +35,7 @@ def main():
 
     # Take care of the river flow data
     flow_data_folder = "Data_RiverFlow"
-    flow_data_file = "DGA.txt"
+    flow_data_file = "Caudales.txt"
 
     date_columns = ["day", "month", "year", "hour"]
 
@@ -52,7 +52,7 @@ def main():
     df = df.drop(columns=date_columns)
     df.insert(1, 'date', date)
 
-    df.to_csv(os.path.join(processed_folder_path, flow_data_file[:3] + ".csv"))
+    df.to_csv(os.path.join(processed_folder_path, "measurements.csv"))
 
 
 if __name__ == "__main__":

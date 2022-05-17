@@ -1,46 +1,288 @@
-import torch
+from __future__ import annotations
+
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import os
+from datetime import timedelta
+from collections import OrderedDict
+
+import torch
 from torch.utils.data import Dataset
+
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
+from sklearn.preprocessing import FunctionTransformer
+
+from typing import Type, Optional, Tuple, List, Union, Dict, Any, Callable
+
+ScalerType = Union[MinMaxScaler, StandardScaler,
+                   MaxAbsScaler, RobustScaler, FunctionTransformer]
+BatchType = Tuple[torch.Tensor, torch.Tensor]
+DataDateDictType = Dict[np.datetime64, BatchType]
 
 
-class RiverFlowDataset(Dataset):
-    def __init__(self, X, y):
+class RiverFlowDataset(Dataset[Any]):
+    def __init__(
+        self,
+        root: Optional[Union[str, os.PathLike[Any]]] = None,
+        scaler_name: str = "none",
+        freq: str = "M",
+        lag: int = 6,
+        lagged_vars: Optional[List[str]] = None,
+        lagged_stations: Optional[List[int]] = None,
+        target_var: str = "river_flow",
+        target_stations: Optional[List[int]] = None,
+        time_features: bool = False,
+        process: bool = False
+    ) -> None:
+        self.root = root if root else os.path.join("data", "processed")
 
-        self.X = torch.tensor(X, dtype=torch.float32)
-        self.y = torch.tensor(y, dtype=torch.float32)
+        self.freq = freq
+        self.scaler_name = scaler_name
+        self.lag = lag
 
-    def __len__(self):
-        return len(self.y)
+        self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
-    def __getitem__(self, idx):
-        return self.X[idx], self.y[idx]
+        self.lagged_stations = lagged_stations if lagged_stations else [34]
+
+        self.target_var = target_var
+
+        if target_stations is None:
+            self.target_stations = [34]
+        else:
+            self.target_stations = target_stations
+
+        self.time_features = time_features
+
+        self.data_date_dict = OrderedDict()  # type: DataDateDictType
+
+        if process:
+            assert self.root
+            self.process(self.root)
+
+    def process(self, root: Union[str, os.PathLike[Any]]) -> None:
+        if not self.root:
+            raise ValueError
+
+        # Gather lagged flow data
+        df_flow_aggregated = load_and_aggregate_flow_data(self.root, self.freq)
+        df_flow_lagged = generate_lags(df_flow_aggregated, self.lagged_vars,
+                                       self.lag)
+
+        # Drop nan values from target variable (river_flow)
+        df_flow_lagged = df_flow_lagged.drop(
+            df_flow_lagged.index[df_flow_lagged[self.target_var] == -1]
+        )
+
+        # Add time features if needed
+        if self.time_features:
+            df_flow_lagged = (
+                df_flow_lagged.assign(
+                    month=df_flow_lagged.date.dt.month,
+                    week=df_flow_lagged.date.dt.isocalendar().week)
+            )
+            # For the weekly scale we can use both month and
+            # week as a cyclical feature
+            if self.freq == "M" or self.freq == "W":
+                df_flow_lagged = generate_cyclical_features(df_flow_lagged,
+                                                            "month", 12, 1)
+            if self.freq == "W":
+                df_flow_lagged = generate_cyclical_features(df_flow_lagged,
+                                                            "week", 52, 1)
+
+        # Scale data
+        self.scaler = get_scaler(self.scaler_name)  # type: ScalerType
+
+        # Scale all columns besides target and unscalable columns
+        flow_scaled_cols = [
+            col for col in df_flow_lagged if col not in [self.target_var, "date", "station_number"]
+        ]
+        df_flow_lagged[flow_scaled_cols] = self.scaler.fit_transform(
+            df_flow_lagged[flow_scaled_cols]
+        )
+
+        # Scale target column separately as we need to inverse transform later
+        df_flow_lagged[[self.target_var]] = self.scaler.fit_transform(
+            df_flow_lagged[[self.target_var]]
+        )
+
+        unique_dates = df_flow_lagged.date.unique()
+
+        self.time_features = True
+
+        for date in unique_dates:
+            date = np.datetime64(date, "D")
+
+            df_flow_date = df_flow_lagged.loc[df_flow_lagged.date == date].sort_values("station_number")
+
+            df_stations_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.lagged_stations)]
+
+            # Concatenate all lagged variables we want into one input vector
+            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.match(".*\\d")]
+            date_features = df_date_features.to_numpy(dtype=np.float32).flatten()
+
+            if self.time_features:
+                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.match("(sin)|(cos)_.*")]
+                # Only add one time feature as they are the same across the stations
+                date_features = np.append(date_features, df_time_features.to_numpy(dtype=np.float32)[0, :])
+
+            date_features = torch.from_numpy(date_features)
+
+            df_target_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.target_stations)]
+            date_targets = torch.from_numpy(df_target_date[self.target_var].to_numpy(dtype=np.float32))
+
+            self.data_date_dict[date] = (date_features, date_targets)
+
+        self.data_list = list(self.data_date_dict.values())
+
+    def set_data(self, date: np.datetime64, value: BatchType) -> None:
+        self.data_date_dict[date] = value
+        self.data_list = list(self.data_date_dict.values())
+
+    def get_item_by_date(self, date: np.datetime64) -> BatchType:
+        return self.data_date_dict[date]
+
+    def __repr__(self) -> str:
+        return repr(self.data_list)
+
+    def __len__(self) -> int:
+        return len(self.data_list)
+
+    def __getitem__(self, index: int) -> BatchType:
+        return self.data_list[index]
 
 
-def generate_lags(df, values, n_lags):
+def split_dataset(
+    dataset: RiverFlowDataset,
+    freq: str = "M", lag: int = 6,
+    val_year_min: int = 1998, val_year_max: int = 2002,
+    test_year_min: int = 2013, test_year_max: int = 2019
+) -> Tuple[RiverFlowDataset, RiverFlowDataset, RiverFlowDataset]:
+
+    assert freq in ["W", "M"]
+    assert val_year_min < val_year_max
+    assert test_year_min < test_year_max
+
+    if freq == "M":
+        offset = pd.tseries.offsets.DateOffset(months=lag)
+    if freq == "W":
+        offset = pd.tseries.offsets.DateOffset(weeks=lag)
+
+    train_dataset = RiverFlowDataset()
+    val_dataset = RiverFlowDataset()
+    test_dataset = RiverFlowDataset()
+
+    val_start = np.datetime64(str(val_year_min), "D")
+    val_end = np.datetime64(str(val_year_max), "D")
+
+    test_start = np.datetime64(str(test_year_min), "D")
+    test_end = np.datetime64(str(test_year_max), "D")
+
+    for date in dataset.data_date_dict:
+        if val_start <= date < val_end:
+            val_dataset.set_data(date, dataset.get_item_by_date(date))
+        elif test_start <= date < test_end:
+            test_dataset.set_data(date, dataset.get_item_by_date(date))
+        # These dates are not allowed in the training set as
+        # they are found as features in the validation or test set
+        elif val_start - offset <= date < val_start:
+            continue
+        elif val_end <= date < val_end + offset:
+            continue
+        elif test_start - offset <= date < test_start:
+            continue
+        elif test_end <= date < test_end + offset:
+            continue
+        else:
+            train_dataset.set_data(date, dataset.get_item_by_date(date))
+
+    return train_dataset, val_dataset, test_dataset
+
+
+def load_and_aggregate_flow_data(
+    root: Union[str, os.PathLike[Any]],
+    freq: str = "M"
+) -> pd.DataFrame:
     """
-    generate_lags
-    Generates a dataframe with columns denoting lagged value up to n_lags
-    Args:
-        df: dataframe to lag
-        value: values to lag
-        n_lags: amount of rows to lag
+    function: load_and_aggregate_flow_data
+
+    Reads river flow data and aggregates it to the frequency specified in freq.
+    Return aggregated river flow data.
     """
-    df_n = df.copy()
 
-    for value in values:
-        for n in range(1, n_lags + 1):
-            df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+    # Import river flow data and only preserve datapoints after 1965
+    df_flow = pd.read_csv(os.path.join(root, "raw-measurements.csv"),
+                          index_col=0, parse_dates=["date"])
+    df_flow = df_flow.loc[df_flow["date"].dt.year >= 1965]
 
-    df_n = df_n.iloc[n_lags:]
+    # Gather every month from start and end date
+    start_date = df_flow["date"].min()
+    end_date = df_flow["date"].max()
+    date_range = pd.date_range(start_date, end_date, freq=freq, normalize=True)
 
-    return df_n
+    # We split the dataframes based on station number and process them
+    station_dfs = []
+
+    for station_number in df_flow.station_number.unique():
+        df_station_flow = df_flow.loc[df_flow.station_number == station_number]
+        df_station_flow_aggregated = df_station_flow.groupby(
+                                pd.Grouper(key="date", freq=freq)
+                            )[["river_flow", "river_height"]].mean()
+        df_station_flow_aggregated = df_station_flow_aggregated.reset_index()
+
+        # Create new dataframe based on date range so every date is found in
+        # flow data
+        new_df = pd.DataFrame(date_range, columns=["date"])
+        df_station_flow_aggregated = pd.merge(new_df,
+                                              df_station_flow_aggregated,
+                                              how="left")
+        df_station_flow_aggregated["station_number"] = station_number
+
+        station_dfs.append(df_station_flow_aggregated)
+
+    df_flow_aggregated = pd.concat(station_dfs)
+
+    # Fill in missing values with -1 for imputation
+    df_flow_aggregated = df_flow_aggregated.fillna(-1)
+
+    return df_flow_aggregated
 
 
-def generate_cyclical_features(df, col_name, period, start_num=0):
+def generate_lags(
+    df: pd.DataFrame, values: List[str], n_lags: int
+) -> pd.DataFrame:
+    """
+    function: generate_lags
+
+    Generates a dataframe with columns denoting lagged value up to n_lags,
+    does this per station number so there is no overlap between stations.
+    """
+    station_numbers = df.station_number.unique()
+    frames = []
+
+    # Iterate over dataframes split by station number
+    for _, df_station_flow_agg in df.groupby("station_number"):
+
+        # Lag each dataframe individually
+        df_n = df_station_flow_agg.copy()
+
+        for value in values:
+            for n in range(1, n_lags + 1):
+                df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+
+        frames.append(df_n)
+
+    # Impute missing values
+    df_merged_flow_agg = pd.concat(frames)
+    df_merged_flow_agg = df_merged_flow_agg.fillna(-1)
+
+    return df_merged_flow_agg
+
+
+def generate_cyclical_features(
+    df: pd.DataFrame, col_name: str, period: int, start_num: int = 0
+) -> pd.DataFrame:
 
     kwargs = {
         f"sin_{col_name}":
@@ -52,21 +294,26 @@ def generate_cyclical_features(df, col_name, period, start_num=0):
     return df.assign(**kwargs).drop(columns=[col_name])
 
 
-def get_scaler(scaler):
-    if scaler == "none":
-        return None
+def get_scaler(scaler: str) -> ScalerType:
+    """
+    function: get_scaler
 
+    Returns a scaler from a selection of 4 options, given the string name.
+    """
     scalers = {
-        "minmax": MinMaxScaler,
-        "standard": StandardScaler,
-        "maxabs": MaxAbsScaler,
-        "robust": RobustScaler,
+        "minmax": MinMaxScaler(),
+        "standard": StandardScaler(),
+        "maxabs": MaxAbsScaler(),
+        "robust": RobustScaler(),
+        "none": FunctionTransformer(pd.DataFrame.to_numpy)
     }
 
-    return scalers[scaler.lower()]()
+    return scalers[scaler.lower()]
 
 
-def gather_ndsi_ndvi_data(watersheds=None):
+def gather_ndsi_ndvi_data(
+    watersheds: Optional[List[str]] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     This function returns the full processed data using various arguments
     as a pd.DataFrame
@@ -100,31 +347,32 @@ def gather_ndsi_ndvi_data(watersheds=None):
     return df_NDSI, df_NDVI
 
 
-def aggregate_area_data(df_NDSI, df_NDVI, column):
+def aggregate_area_data(
+    freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame, column: str
+) -> pd.DataFrame:
     """
     This function will correctly aggregate area data given the column
     Args:
+        freq: frequency of aggregation
         df_NDSI: dataframe containing filtered NDSI values
         df_NDVI: dataframe containing filtered NDVI values
         column: column name to aggregate, must contain 'Surf'
     """
-
-    if "Surf" not in column:
-        raise InputError("'Surf' must be found in column name")
+    assert "Surf" in column
 
     # Take sum of each day and average over the months to aggregate area data
     daily_ndsi_surf_sum = df_NDSI.groupby(
-                            pd.Grouper(key='date', freq='M')
+                            pd.Grouper(key='date', freq="D")
                         )[[column]].sum().reset_index()
     daily_ndvi_surf_sum = df_NDVI.groupby(
-                            pd.Grouper(key='date', freq='M')
+                            pd.Grouper(key='date', freq="D")
                         )[[column]].sum().reset_index()
 
     monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(
-                                pd.Grouper(key='date', freq='M')
+                                pd.Grouper(key='date', freq=freq)
                             )[[column]].mean()
     monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(
-                                pd.Grouper(key='date', freq='M')
+                                pd.Grouper(key='date', freq=freq)
                             )[[column]].mean()
 
     surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
@@ -139,7 +387,9 @@ def aggregate_area_data(df_NDSI, df_NDVI, column):
     return surf_ndsi_ndvi_df
 
 
-def aggregate_index_data(df_NDSI, df_NDVI):
+def aggregate_index_data(
+    freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame
+) -> pd.DataFrame:
     """
     Returns the aggregated NDSI NDVI data with lagged variables
     Args:
@@ -149,10 +399,10 @@ def aggregate_index_data(df_NDSI, df_NDVI):
 
     # Take average of NDSI values for each month and aggregate
     monthly_ndsi_mean = df_NDSI.groupby(pd.Grouper(
-                            key='date', freq='M')
+                            key='date', freq=freq)
                         )[["avg"]].mean()
     monthly_ndvi_mean = df_NDVI.groupby(pd.Grouper(
-                            key='date', freq='M')
+                            key='date', freq=freq)
                         )[["avg"]].mean()
 
     # Rename columns to enable merging
@@ -168,171 +418,9 @@ def aggregate_index_data(df_NDSI, df_NDVI):
     return ndsi_ndvi_df
 
 
-def merge_aggregated_data(df_features, index=False,
-                          surface=False, cloud=False):
-    """
-    We merge NDSI NDVI data into df_features and the
-    Args:
-        df_features: dataframe to merge ndsi_ndvi_df into
-    """
-    watersheds = ["03400", "03401", "03402",
-                  "03403", "03404", "03410",
-                  "03411", "03412", "03413",
-                  "03414", "03420", "03421"]
+if __name__ == "__main__":
+    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34, 340, 341, 342], target_stations=[34], scaler_name="standard", process=True, time_features=True)
+    sample = x[0]
 
-    df_ndsi, df_ndvi = gather_ndsi_ndvi_data(watersheds=watersheds)
-
-    if index:
-        index_df = aggregate_index_data(df_ndsi, df_ndvi)
-        df_features = pd.merge(df_features, index_df, how="left")
-
-    if surface:
-        surface_df = aggregate_area_data(df_ndsi, df_ndvi, "Surfavg")
-        df_features = pd.merge(df_features, surface_df, how="left")
-
-    if cloud:
-        cloud_df = aggregate_area_data(df_ndsi, df_ndvi, "Surfcloudavg")
-        df_features = pd.merge(df_features, cloud_df, how="left")
-
-    df_features = df_features.fillna(-1, downcast="infer")
-
-    return df_features
-
-
-def gather_data(lag=6, time_features=False, index_features=False,
-                index_surf_features=False, index_cloud_features=False):
-    """
-    This function returns the full preprocessed data using various arguments
-    as a pd.DataFrame
-
-    Args:
-        int lag: amount of time lag to be used as features
-        bool time_features: use (cyclical) time as a feature
-    """
-    processed_folder_path = os.path.join("data", "processed")
-
-    # Import river flow data and only preserve datapoints after 1965
-    df_DGA = pd.read_csv(os.path.join(processed_folder_path, "DGA.csv"),
-                         index_col=0, parse_dates=["date"])
-    df_DGA = df_DGA.loc[df_DGA["date"].dt.year >= 1965]
-
-    # Extract average monthly river flow
-    monthly_flow_data_mean = df_DGA.groupby(
-                                    pd.Grouper(key='date', freq='M')
-                                )['river_flow'].mean()
-    flow_mean_df = monthly_flow_data_mean.reset_index()
-
-    # Gather every month from start and end date
-    start_date = flow_mean_df.date.min()
-    end_date = flow_mean_df.date.max()
-    date_range = pd.date_range(start_date, end_date, freq="M")
-    new_df = pd.DataFrame(date_range, columns=["date"])
-    flow_mean_df = pd.merge(new_df, flow_mean_df, how="left")
-
-    # Fill in missing values with -1 for imputation
-    flow_mean_df = flow_mean_df.fillna(-1)
-
-    df_features = generate_lags(flow_mean_df, ["river_flow"], lag)
-
-    # Add time as a feature
-    if time_features:
-        df_features = (
-            df_features
-            .assign(month=df_features.date.dt.month)
-        )
-
-        df_features = generate_cyclical_features(df_features, "month", 12, 1)
-
-    # Add the index features if requested
-    df_features = merge_aggregated_data(df_features, index=index_features,
-                                        surface=index_surf_features,
-                                        cloud=index_cloud_features)
-
-    feat_cols = []
-
-    if index_features:
-        feat_cols += ["ndsi_avg", "ndvi_avg"]
-    if index_surf_features:
-        feat_cols += ["ndsi_Surfavg", "ndvi_Surfavg"]
-    if index_cloud_features:
-        feat_cols += ["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
-
-    df_features = generate_lags(df_features, feat_cols, lag)
-    df_features = df_features.drop(columns=feat_cols)
-
-    df_features.river_flow = df_features.river_flow.replace(-1, pd.NA)
-    df_features = df_features.dropna()
-
-    return df_features
-
-
-def feature_label_split(df, target_col):
-    """
-    Split dataframe into two based on target_col
-    """
-    y = df[[target_col]]
-    X = df.drop(columns=[target_col])
-
-    return X, y
-
-
-def split_data(df_features, lag,
-               val_year_min=1998, val_year_max=2002,
-               test_year_min=2013, test_year_max=2019):
-
-    """
-    This functions splits the data into a training, validation and test set
-    based on the years and the lag provided
-    Args:
-        df_features: dataframe containing the features of the overall dataset
-        lag: lag in dataset
-        val_years: years to be used in validation set
-        test_years: years to be used in test set
-    """
-    # We create an offset period range off year/months we don't want in the
-    # training set
-    df_features = df_features.set_index("date")
-
-    offset = pd.tseries.offsets.DateOffset(months=lag)
-    val_start = pd.to_datetime(str(val_year_min)) - offset
-    test_start = pd.to_datetime(str(test_year_min)) - offset
-    val_end = pd.to_datetime(str(val_year_max)) + offset
-    test_end = pd.to_datetime(str(test_year_max)) + offset
-
-    val_df = df_features.loc[val_start: val_end]
-    test_df = df_features.loc[test_start: test_end]
-    train_df = pd.concat([df_features, val_df, test_df])
-    train_df = train_df.drop_duplicates(keep=False)
-
-    return train_df, val_df, test_df
-
-
-def scale_data(scaler, train_df, val_df, test_df):
-    """
-    Returns transformed data according to scaler provided,
-    will return values as is if scaler is None
-    """
-    X_train, y_train = feature_label_split(train_df, "river_flow")
-    X_val, y_val = feature_label_split(val_df, "river_flow")
-    X_test, y_test = feature_label_split(test_df, "river_flow")
-
-    # Transform the input according to chosen scaler if it is given
-    if scaler is not None:
-        X_train_arr = scaler.fit_transform(X_train.values)
-        X_val_arr = scaler.transform(X_val.values)
-        X_test_arr = scaler.transform(X_test.values)
-
-        y_train_arr = scaler.fit_transform(y_train.values)
-        y_val_arr = scaler.transform(y_val.values)
-        y_test_arr = scaler.transform(y_test.values)
-    else:
-        X_train_arr = X_train.values
-        X_val_arr = X_val.values
-        X_test_arr = X_test.values
-
-        y_train_arr = y_train.values
-        y_val_arr = y_val.values
-        y_test_arr = y_test.values
-
-    return (X_train_arr, X_val_arr, X_test_arr,
-            y_train_arr, y_val_arr, y_test_arr)
+    print(sample[0].shape)
+    print(sample[1].shape)
