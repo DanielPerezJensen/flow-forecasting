@@ -30,6 +30,8 @@ import argparse
 # Custom imports
 import models
 import data
+import plotting
+import utils
 
 from typing import Union, List
 
@@ -93,28 +95,37 @@ def train(cfg: DictConfig) -> None:
         logger: Union[WandbLogger, TensorBoardLogger]
 
         # Set logger based on configuration file
-        if cfg.training.wandb.run:
+        if cfg.run.wandb:
             logger = WandbLogger(save_dir=get_original_cwd(),
-                                 project=cfg.training.wandb.project,
-                                 entity=cfg.training.wandb.entity,
-                                 offline=cfg.training.wandb.offline)
+                                 project=cfg.run.wandb.project,
+                                 entity=cfg.run.wandb.entity,
+                                 offline=cfg.run.wandb.offline)
             wandb_config = OmegaConf.to_container(
                 cfg, resolve=True, throw_on_missing=True
             )
             logger.experiment.config.update(wandb_config)
 
-            if cfg.training.wandb.watch:
+            if cfg.run.wandb.watch:
                 logger.watch(model, log="all")
         else:
-            logger = TensorBoardLogger(save_dir=get_original_cwd())
+            version_name = f"name={cfg.model.name}+lr={cfg.optimizer.hparams.lr}+scaler={cfg.data.scaler_name}"
+            logger = TensorBoardLogger(save_dir=get_original_cwd(), version=version_name)
 
-        print(pl.utilities.model_summary.summarize(model))
         trainer = pl.Trainer(gpus=cfg.training.gpu, log_every_n_steps=10,
                              max_epochs=cfg.training.epochs, logger=logger)
-        # trainer.fit(model, train_loader, val_loader)
+        trainer.fit(model, train_loader, val_loader)
 
-        if cfg.training.wandb.run:
+        if cfg.run.wandb:
             wandb.finish(quiet=True)
+
+        inputs, outputs, predictions = utils.predict(model, test_loader)
+        index = list(test.data_date_dict.keys())
+        df_results = utils.format_predictions(inputs, outputs,
+                                              predictions, index)
+
+        if cfg.run.plotting:
+            plotting.plot_predictions(df_results)
+            plotting.plot_ind_predictions(df_results)
 
 
 if __name__ == "__main__":

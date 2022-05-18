@@ -13,6 +13,7 @@ import argparse
 # Custom imports
 import data
 import utils
+import plotting
 from data import RiverFlowDataset
 
 # Typing imports
@@ -72,16 +73,18 @@ class AverageMonthPredictor:
 def predict_dataset(
     model: Union[AverageMonthPredictor, PreviousMonthPredictor],
     dataset: RiverFlowDataset
-) -> Tuple[npt.NDArray[float], npt.NDArray[float]]:
+) -> Tuple[npt.NDArray[float], npt.NDArray[float], npt.NDArray[float]]:
 
+    inputs = []
     predictions = []
-    values = []
+    gt = []
 
-    for date, (_, out) in dataset.data_date_dict.items():
-        values.append(out.item())
+    for date, (inp, out) in dataset.data_date_dict.items():
+        inputs.append(inp.cpu().numpy())
         predictions.append(model.predict(date))
+        gt.append(out.item())
 
-    return np.array(predictions), np.array(values)
+    return np.array(inputs), np.array(predictions), np.array(gt)
 
 
 def baseline(args: argparse.Namespace) -> None:
@@ -112,21 +115,22 @@ def baseline(args: argparse.Namespace) -> None:
 
     model.fit()
 
-    predictions, values = predict_dataset(model, test)
+    inputs, predictions, values = predict_dataset(model, test)
 
     index = list(test.data_date_dict.keys())
 
-    df_results = utils.format_predictions(predictions, values, index)
+    df_results = utils.format_predictions(inputs, predictions, values, index)
 
     results_metrics = utils.calculate_metrics(df_results)
 
     print("Metrics of predicted values:")
+
     for key, val in results_metrics.items():
         print(f"{key.upper()}: {val:.3f}")
 
-    # if args.plot:
-    #     plotting.plot_predictions(df_results)
-    #     plotting.plot_ind_predictions(df_results)
+    if args.plot:
+        plotting.plot_predictions(df_results)
+        plotting.plot_ind_predictions(df_results)
 
 
 if __name__ == "__main__":
