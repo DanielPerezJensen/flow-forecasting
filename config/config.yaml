@@ -10,13 +10,16 @@ hydra:
   run:
     dir: .
 
-training:
+run:
   wandb:
-    run: True
+    on: True
     watch: False
-    project: graph
+    project: baselines
     entity: DanielPerezJensen
     offline: True
+  plotting: False
+
+training:
   seeds: [42]
   gpu: 1
   epochs: 25

@@ -1,2 +1,2 @@
 name: mlp
-layers: [64, 32]
+layers: [64, 32, 16]
