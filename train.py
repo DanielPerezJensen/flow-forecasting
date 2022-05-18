@@ -108,11 +108,13 @@ def train(cfg: DictConfig) -> None:
         else:
             logger = TensorBoardLogger(save_dir=get_original_cwd())
 
+        print(pl.utilities.model_summary.summarize(model))
         trainer = pl.Trainer(gpus=cfg.training.gpu, log_every_n_steps=10,
                              max_epochs=cfg.training.epochs, logger=logger)
-        trainer.fit(model, train_loader, val_loader)
+        # trainer.fit(model, train_loader, val_loader)
 
-        wandb.finish(quiet=True)
+        if cfg.training.wandb.run:
+            wandb.finish(quiet=True)
 
 
 if __name__ == "__main__":
