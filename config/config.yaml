@@ -11,12 +11,14 @@ hydra:
     dir: .
 
 run:
-  wandb:
+  log:
     on: True
-    watch: False
-    project: baselines
-    entity: DanielPerezJensen
-    offline: True
+    wandb:
+      on: True
+      watch: False
+      project: baselines
+      entity: DanielPerezJensen
+      offline: True
   plotting: False
 
 training:

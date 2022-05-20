@@ -33,7 +33,7 @@ import data
 import plotting
 import utils
 
-from typing import Union, List
+from typing import Union, List, Optional
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -63,16 +63,24 @@ def train(cfg: DictConfig) -> None:
         batch_size = cfg.training.batch_size
 
         train_loader = DataLoader(train, batch_size=batch_size,
-                                  shuffle=False, num_workers=8)
+                                  shuffle=True, num_workers=8)
         val_loader = DataLoader(val, batch_size=batch_size,
                                 shuffle=False, num_workers=8)
         test_loader = DataLoader(test, batch_size=1,
                                  shuffle=False, num_workers=8)
 
-        scaler = dataset.scaler
+        # Extract a sample and gather input and output dim from it
         sample = dataset[0]
-        input_dim = sample[0].shape[0]
+
+        if cfg.model.name == "mlp":
+            input_dim = torch.numel(sample[0])
+        else:
+            input_dim = sample[0].shape[1]
+
         output_dim = sample[1].shape[0]
+
+        # Retrieve scaler used to scale values in dataset
+        scaler = dataset.scaler
 
         if cfg.model.name == "mlp":
             model = models.MLP(input_dim, output_dim, scaler, cfg)
@@ -92,34 +100,36 @@ def train(cfg: DictConfig) -> None:
             callbacks.append(early_stop_callback)
 
         # Type definition for logger
-        logger: Union[WandbLogger, TensorBoardLogger]
+        logger: Union[Union[WandbLogger, TensorBoardLogger], None]
 
         # Set logger based on configuration file
-        if cfg.run.wandb:
-            logger = WandbLogger(save_dir=get_original_cwd(),
-                                 project=cfg.run.wandb.project,
-                                 entity=cfg.run.wandb.entity,
-                                 offline=cfg.run.wandb.offline)
-            wandb_config = OmegaConf.to_container(
-                cfg, resolve=True, throw_on_missing=True
-            )
-            logger.experiment.config.update(wandb_config)
+        if cfg.run.log:
+            if cfg.run.log.wandb:
+                logger = WandbLogger(save_dir=get_original_cwd(),
+                                     project=cfg.run.log.wandb.project,
+                                     entity=cfg.run.log.wandb.entity,
+                                     offline=cfg.run.log.wandb.offline)
+                wandb_config = OmegaConf.to_container(
+                    cfg, resolve=True, throw_on_missing=True
+                )
+                logger.experiment.config.update(wandb_config)
 
-            if cfg.run.wandb.watch:
-                logger.watch(model, log="all")
+                if cfg.run.log.wandb.watch:
+                    logger.watch(model, log="all")
+            else:
+                logger = TensorBoardLogger(save_dir=get_original_cwd())
         else:
-            version_name = f"name={cfg.model.name}+lr={cfg.optimizer.hparams.lr}+scaler={cfg.data.scaler_name}"
-            logger = TensorBoardLogger(save_dir=get_original_cwd(), version=version_name)
+            logger = None
 
         trainer = pl.Trainer(gpus=cfg.training.gpu, log_every_n_steps=10,
                              max_epochs=cfg.training.epochs, logger=logger)
         trainer.fit(model, train_loader, val_loader)
 
-        if cfg.run.wandb:
+        if cfg.run.log and cfg.run.log.wandb:
             wandb.finish(quiet=True)
 
         inputs, outputs, predictions = utils.predict(model, test_loader)
-        index = list(test.data_date_dict.keys())
+        index = np.array(list(test.data_date_dict.keys()))
         df_results = utils.format_predictions(inputs, outputs,
                                               predictions, index)
 

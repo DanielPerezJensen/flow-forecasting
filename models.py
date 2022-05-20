@@ -88,6 +88,7 @@ class MLP(pl.LightningModule):
         self.model = nn.Sequential(*self.layers)  # type: Callable[[torch.Tensor], torch.Tensor]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.flatten(x, start_dim=1)
         return self.model(x)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
@@ -167,8 +168,6 @@ class GRU(pl.LightningModule):
         # Initializing hidden state for first input with zeros
         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim,
                          device=x.device).requires_grad_().to(x.device)
-
-        x = x.view([x.shape[0], -1, self.input_dim])
 
         # Forward propagation by passing in the input and hidden state
         gru_out, _ = self.model(x, h0.detach())
@@ -263,9 +262,6 @@ class LSTM(pl.LightningModule):
         # Initializing cell state for first input with zeros
         c0 = torch.zeros(self.layer_dim, x.size(0),
                          self.hidden_dim).requires_grad_().to(x.device)
-
-        x = x.view([x.shape[0], -1, self.input_dim])
-
         lstm_out, (hn, cn) = self.model(x, (h0.detach(), c0.detach()))
 
         # Reshaping the outputs in the shape of

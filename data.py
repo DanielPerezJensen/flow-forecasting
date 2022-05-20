@@ -36,6 +36,25 @@ class RiverFlowDataset(Dataset[Any]):
         time_features: bool = False,
         process: bool = False
     ) -> None:
+        """
+        RiverFlowDataset:
+
+        This class contains all data handling code, and creates a properly
+        formatted PyTorch Dataset
+
+        Args:
+            root: root directory of the preprocessed data
+            scaler_name: name of the scaler retrieved using get_scaler()
+            freq: frequency of datapoints either M or W
+            lag: amount of lag we use as features for prediction
+            lagged_vars: variables in data to lag
+            lagged_stations: stations to lag and consider as feature
+            target_var: variable we wish to predict
+            target_stations: stations we wish to predict target_var of
+            time_features: include time as a feature
+            flatten: flatten input features (True if we use MLP model)
+            process: process the dataset or not, only needed for full dataset
+        """
         self.root = root if root else os.path.join("data", "processed")
 
         self.freq = freq
@@ -62,6 +81,12 @@ class RiverFlowDataset(Dataset[Any]):
             self.process(self.root)
 
     def process(self, root: Union[str, os.PathLike[Any]]) -> None:
+        """
+        This function processes the data found in root into an ordered
+        dict and list of data
+        Args:
+            root: path to preprocessed data
+        """
         if not self.root:
             raise ValueError
 
@@ -120,12 +145,20 @@ class RiverFlowDataset(Dataset[Any]):
 
             # Concatenate all lagged variables we want into one input vector
             df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.match(".*\\d")]
-            date_features = df_date_features.to_numpy(dtype=np.float32).flatten()
+
+            date_features = df_date_features.to_numpy(dtype=np.float32)
+            date_features = date_features.reshape((-1, len(self.lagged_stations)))
 
             if self.time_features:
                 df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.match("(sin)|(cos)_.*")]
+
                 # Only add one time feature as they are the same across the stations
-                date_features = np.append(date_features, df_time_features.to_numpy(dtype=np.float32)[0, :])
+                time_features = df_time_features.to_numpy(dtype=np.float32)[0, :]
+
+                # Reshaping tricks to properly stack sin cos on top of river flow feature
+                time_features = time_features.reshape(1, -1)
+                time_features = np.repeat(time_features, self.lag, axis=0)
+                date_features = np.append(date_features, time_features, axis=1)
 
             date_features = torch.from_numpy(date_features)
 
@@ -137,10 +170,21 @@ class RiverFlowDataset(Dataset[Any]):
         self.data_list = list(self.data_date_dict.values())
 
     def set_data(self, date: np.datetime64, value: BatchType) -> None:
+        """
+        This function will set a datapoint in the OrderedDict by date
+        Args:
+            date: np.datetime64
+            value: batch of data
+        """
         self.data_date_dict[date] = value
         self.data_list = list(self.data_date_dict.values())
 
     def get_item_by_date(self, date: np.datetime64) -> BatchType:
+        """
+        Returns a batch item using a date from the OrderedDict
+        Args:
+            date: np.datetime64
+        """
         return self.data_date_dict[date]
 
     def __repr__(self) -> str:
@@ -419,7 +463,7 @@ def aggregate_index_data(
 
 
 if __name__ == "__main__":
-    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34, 340, 341, 342], target_stations=[34], scaler_name="standard", process=True, time_features=True)
+    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34], target_stations=[34], scaler_name="standard", process=True, time_features=True)
     sample = x[0]
 
     print(sample[0].shape)

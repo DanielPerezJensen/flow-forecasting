@@ -36,7 +36,8 @@ class PreviousMonthPredictor:
         next(b, None)
 
         for date, next_date in zip(a, b):
-            self.fit_dict[next_date] = self.dataset.get_item_by_date(date)[1].item()
+            next_value = self.dataset.get_item_by_date(date)[1].item()
+            self.fit_dict[next_date] = next_value
 
     def predict(self, inp: Union[str, np.datetime64]) -> float:
         date = np.datetime64(inp)
@@ -77,17 +78,17 @@ def predict_dataset(
 
     inputs = []
     predictions = []
-    gt = []
+    values = []
 
     for date, (inp, out) in dataset.data_date_dict.items():
-        inputs.append(inp.cpu().numpy())
+        inputs.append(inp.squeeze().numpy())
         predictions.append(model.predict(date))
-        gt.append(out.item())
+        values.append(out.item())
 
-    return np.array(inputs), np.array(predictions), np.array(gt)
+    return np.array(inputs), np.array(predictions), np.array(values)
 
 
-def baseline(args: argparse.Namespace) -> None:
+def main(args: argparse.Namespace) -> None:
     processed_path = os.path.join("data", "processed")
 
     dataset = data.RiverFlowDataset(
@@ -105,11 +106,11 @@ def baseline(args: argparse.Namespace) -> None:
 
     model: Union[AverageMonthPredictor, PreviousMonthPredictor]
 
-    if args.baseline == "AverageMonth":
+    if args.model == "AverageMonth":
 
         model = AverageMonthPredictor(dataset)
 
-    elif args.baseline == "PreviousMonth":
+    elif args.model == "PreviousMonth":
 
         model = PreviousMonthPredictor(dataset)
 
@@ -137,7 +138,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Train model")
 
-    parser.add_argument("--baseline", default="PreviousMonth", type=str,
+    parser.add_argument("--model", default="PreviousMonth", type=str,
                         help="Baseline to analyze",
                         choices=["PreviousMonth", "AverageMonth"])
     parser.add_argument("--plot", action="store_true",
@@ -145,4 +146,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    baseline(args)
+    main(args)

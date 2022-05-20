@@ -35,8 +35,7 @@ def predict(
 ) -> Tuple[npt.NDArray[float], npt.NDArray[float], npt.NDArray[float]]:
     """
     This function gathers the predictions from the model and the
-    actual values found in the test_loader. Input_dim is only
-    a value if the inputted model is the GRU.
+    actual values found in the test_loader.
     Args:
         model: PytorchLightningModule
         test_loader: pytorch.DataLoader
@@ -58,7 +57,9 @@ def predict(
 
         outputs = model(inp)
 
-        inputs.append(inp.detach().cpu().squeeze().numpy())
+        # We only care about the pastillo station as that is
+        # what we are predicting TODO: Maybe add target stations
+        inputs.append(inp.detach().cpu().squeeze().numpy()[:, 0])
         predictions.append(outputs.detach().cpu().numpy().item())
         values.append(targets.detach().cpu().numpy().item())
 
