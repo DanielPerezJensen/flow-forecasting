@@ -1,0 +1,4 @@
+name: gru
+hidden_dim: 64
+layer_dim: 1
+dropout_prob: 0

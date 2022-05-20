@@ -2,10 +2,11 @@ import plotly.graph_objs as go
 from plotly.subplots import make_subplots
 from plotly.offline import iplot
 import numpy as np
+import pandas as pd
 from torch.utils.data import DataLoader
 
 
-def plot_predictions(df_result):
+def plot_predictions(df_result: pd.DataFrame) -> None:
     """
     This function plots the predictions given in df_result
     against the actual ground truth values.
@@ -49,7 +50,7 @@ def plot_predictions(df_result):
     fig.show()
 
 
-def plot_ind_predictions(df_result):
+def plot_ind_predictions(df_result: pd.DataFrame) -> None:
     """
     This function randomly samples 16 datapoints from the test set and
     plots the prediction against the value while also including the
@@ -60,7 +61,7 @@ def plot_ind_predictions(df_result):
     col_list = df_result.columns
     lag_cols = [i[0] for i in
                 col_list.str.findall("^river_flow_.*") if len(i) > 0][::-1]
-    lag_cols.append("river_flow")
+    lag_cols.append("value")
 
     n = 16
 

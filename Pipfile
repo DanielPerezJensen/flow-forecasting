@@ -10,19 +10,18 @@ name = "downloadpytorch"
 
 [packages]
 torch = {index="downloadpytorch", version="==1.11.0+cu113"}
-jupyter = "*"
-pandas = "*"
-numpy = "*"
-statsmodels = "*"
-openpyxl = "*"
-tqdm = "*"
-scikit-learn = "*"
-plotly = "*"
+jupyter = "==1.0.0"
+pandas = "==1.4.2"
+numpy = "==1.22.3"
+tqdm = "==4.64.0"
+scikit-learn = "==1.0.2"
+plotly = "==5.7.0"
 pytorch-lightning = "*"
-wandb = "*"
-hydroeval = "*"
-matplotlib = "*"
-tensorboard = "*"
+wandb = "==0.12.16"
+mypy = "==0.950"
+matplotlib = "==3.5.2"
+tensorboard = "==2.9.0"
+hydra-core = "==1.1.2"
 
 [dev-packages]
 

@@ -5,99 +5,150 @@ import torch
 import pytorch_lightning as pl
 from torch import nn
 from sklearn.metrics import mean_squared_error, r2_score
+from omegaconf import DictConfig, OmegaConf
+
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
+from sklearn.preprocessing import MaxAbsScaler, RobustScaler
+from sklearn.preprocessing import FunctionTransformer
+
+from typing import Any, Optional, Tuple, List, Dict, Callable, Type, Union
+
+ScalerType = Union[MinMaxScaler, StandardScaler,
+                   MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
-def r2_loss(output, target):
-    target_mean = torch.mean(target)
-    ss_tot = torch.sum((target - target_mean) ** 2)
-    ss_res = torch.sum((target - output) ** 2)
-    r2 = 1 - ss_res / ss_tot
-    return r2
+def shared_eval_step(
+    model: pl.LightningModule,
+    batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+    inputs, targets = batch
+
+    outputs = model(inputs)
+    loss = model.loss_fn(targets, outputs)
+
+    return loss, outputs, targets
+
+
+def shared_eval_epoch_end(
+    model: pl.LightningModule, step_outputs: List[Dict[str, torch.Tensor]]
+) -> float:
+    outputs, targets = [], []
+
+    for out in step_outputs:
+        outputs.append(out["outputs"])
+        targets.append(out["targets"])
+
+    np_outputs = torch.cat(outputs).cpu().detach().numpy()
+    np_targets = torch.cat(targets).cpu().detach().numpy()
+
+    descaled_outputs = model.scaler.inverse_transform(np_outputs)
+    descaled_targets = model.scaler.inverse_transform(np_targets)
+
+    scaled_loss = mean_squared_error(descaled_targets, descaled_outputs,
+                                     squared=False)
+
+    return scaled_loss
+
+
+def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
+
+    optimizer_dict = {
+        "adam": torch.optim.Adam,
+        "adamw": torch.optim.AdamW
+    }
+
+    return optimizer_dict[optimizer_name]
 
 
 class MLP(pl.LightningModule):
-    def __init__(self, config, hidden_layers):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        scaler: ScalerType,
+        cfg: DictConfig
+    ) -> None:
+
         super().__init__()
-
-        self.lr = config["lr"]
-        self.weight_decay = config["weight_decay"]
-
+        self.cfg = cfg
         self.loss_fn = nn.MSELoss()
+        self.scaler = scaler
 
-        self.layers = []
-        layer_sizes = [config["input_dim"]] + hidden_layers
+        self.layers = []  # type: List[nn.Module]
+        layer_sizes = [input_dim] + list(self.cfg.model.layers)
 
         for layer_index in range(1, len(layer_sizes)):
             self.layers.append(nn.Linear(layer_sizes[layer_index - 1],
                                          layer_sizes[layer_index]))
             self.layers.append(nn.ReLU())
 
-        self.layers.append(nn.Linear(layer_sizes[-1], config["output_dim"]))
+        self.layers.append(nn.Linear(layer_sizes[-1], output_dim))
 
-        self.layers = nn.Sequential(*self.layers)
+        self.model = nn.Sequential(*self.layers)  # type: Callable[[torch.Tensor], torch.Tensor]
 
-        self.config = config
-        self.save_hyperparameters()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = torch.flatten(x, start_dim=1)
+        return self.model(x)
 
-    def forward(self, x):
-        return self.layers(x)
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = get_optimizer(self.cfg.optimizer.name)
+        return optimizer(self.parameters(), **self.cfg.optimizer.hparams)
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
-                                     weight_decay=self.weight_decay)
-        return optimizer
+    def training_step(
+        self, train_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-    def training_step(self, train_batch, batch_idx):
-        inputs, targets = train_batch
-        outputs = self(inputs)
-        loss = self.loss_fn(targets, outputs)
+        loss, outputs, targets = shared_eval_step(self, train_batch, batch_idx)
         self.log("train_loss", loss)
-
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        inputs, targets = val_batch
-        outputs = self(inputs)
-        loss = self.loss_fn(targets, outputs)
-        self.log("val_loss", loss, on_epoch=True, on_step=True)
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-    def validation_epoch_end(self, validation_step_outputs):
-        outputs, targets = [], []
+    def validation_step(
+        self, val_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-        for out in validation_step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
+        loss, outputs, targets = shared_eval_step(self, val_batch, batch_idx)
+        self.log("val_loss", loss)
 
-        outputs = torch.cat(outputs).cpu().numpy()
-        targets = torch.cat(targets).cpu().numpy()
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-        outputs = self.config["scaler"].inverse_transform(outputs)
-        targets = self.config["scaler"].inverse_transform(targets)
+    def training_epoch_end(
+        self, training_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
 
-        r2 = r2_score(targets, outputs)
-        scaled_loss = mean_squared_error(targets, outputs)
+        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
 
-        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
-        self.log("r2_scaled", r2, on_epoch=True, on_step=False)
+        self.log("train_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)
+
+    def validation_epoch_end(
+        self, validation_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+
+        self.log("val_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)
 
 
 class GRU(pl.LightningModule):
-    def __init__(self, config, hidden_dim, layer_dim, dropout_prob):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        scaler: ScalerType,
+        cfg: DictConfig
+    ) -> None:
         super().__init__()
 
         # Defining the number of layers and the nodes in each layer
-        self.input_dim = config["input_dim"]
-        self.output_dim = config["output_dim"]
+        self.input_dim = input_dim
+        self.output_dim = output_dim
 
-        self.layer_dim = layer_dim
-        self.dropout_prob = dropout_prob
-        self.hidden_dim = hidden_dim
-
-        # Training parameters
-        self.lr = config["lr"]
-        self.weight_decay = config["weight_decay"]
+        self.layer_dim = cfg.model.layer_dim
+        self.dropout_prob = cfg.model.dropout_prob
+        self.hidden_dim = cfg.model.hidden_dim
 
         self.loss_fn = nn.MSELoss()
 
@@ -108,165 +159,152 @@ class GRU(pl.LightningModule):
         )
 
         # Fully connected layer
-        self.fc = nn.Linear(self.hidden_dim, self.output_dim)
+        self.fc = nn.Linear(self.hidden_dim, self.output_dim)  # type: Callable[[torch.Tensor], torch.Tensor]
 
-        self.config = config
-        self.save_hyperparameters()
+        self.scaler = scaler
+        self.cfg = cfg
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Initializing hidden state for first input with zeros
         h0 = torch.zeros(self.layer_dim, x.size(0), self.hidden_dim,
-                         device=x.device).requires_grad_()
+                         device=x.device).requires_grad_().to(x.device)
 
         # Forward propagation by passing in the input and hidden state
-        out, _ = self.model(x, h0.detach())
+        gru_out, _ = self.model(x, h0.detach())
 
         # Reshaping the outputs in the shape of
         # (batch_size, seq_length, hidden_size)
         # so that it can fit into the fully connected layer
-        out = out[:, -1, :]
+        gru_out = gru_out[:, -1, :]
 
         # Convert the final state to our desired output shape
         # (batch_size, output_dim)
-        out = self.fc(out)
+        return self.fc(gru_out)
 
-        return out
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = get_optimizer(self.cfg.optimizer.name)
+        return optimizer(self.parameters(), **self.cfg.optimizer.hparams)
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
-                                     weight_decay=self.weight_decay)
-        return optimizer
+    def training_step(
+        self, train_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-    def training_step(self, train_batch, batch_idx):
-        inputs, targets = train_batch
-        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
-        outputs = self(inputs)
-
-        loss = self.loss_fn(targets, outputs)
-        self.log("train_loss", loss, on_epoch=True, on_step=True)
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        inputs, targets = val_batch
-        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
-
-        outputs = self(inputs)
-
-        loss = self.loss_fn(targets, outputs)
-        self.log("val_loss", loss, on_epoch=True, on_step=True)
+        loss, outputs, targets = shared_eval_step(self, train_batch, batch_idx)
+        self.log("train_loss", loss)
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-    def validation_epoch_end(self, validation_step_outputs):
-        outputs, targets = [], []
+    def validation_step(
+        self, val_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-        for out in validation_step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
+        loss, outputs, targets = shared_eval_step(self, val_batch, batch_idx)
+        self.log("val_loss", loss)
 
-        outputs = torch.cat(outputs).cpu().numpy()
-        targets = torch.cat(targets).cpu().numpy()
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-        r2 = r2_score(targets, outputs)
+    def training_epoch_end(
+        self, training_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
 
-        outputs = self.config["scaler"].inverse_transform(outputs)
-        targets = self.config["scaler"].inverse_transform(targets)
+        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
 
-        scaled_loss = mean_squared_error(targets, outputs)
+        self.log("train_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)
 
-        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
-        self.log("r2_scaled", r2, on_epoch=True, on_step=False)
+    def validation_epoch_end(
+        self, validation_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+
+        self.log("val_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)
 
 
 class LSTM(pl.LightningModule):
-    def __init__(self, config, hidden_dim, layer_dim, dropout_prob):
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        scaler: ScalerType,
+        cfg: DictConfig
+    ) -> None:
         super().__init__()
 
         # Defining the number of layers and the nodes in each layer
-        self.input_dim = config["input_dim"]
-        self.output_dim = config["output_dim"]
+        self.input_dim = input_dim
+        self.output_dim = output_dim
 
-        self.layer_dim = layer_dim
-        self.dropout_prob = dropout_prob
-        self.hidden_dim = hidden_dim
-
-        # Training parameters
-        self.lr = config["lr"]
-        self.weight_decay = config["weight_decay"]
+        self.layer_dim = cfg.model.layer_dim
+        self.dropout_prob = cfg.model.dropout_prob
+        self.hidden_dim = cfg.model.hidden_dim
 
         self.loss_fn = nn.MSELoss()
 
         # GRU/LSTM layers
         self.model = nn.LSTM(
-            self.input_dim, self.hidden_dim, self.layer_dim,
-            batch_first=True, dropout=self.dropout_prob
+            input_dim, cfg.model.hidden_dim, cfg.model.layer_dim,
+            batch_first=True, dropout=cfg.model.dropout_prob
         )
 
         # Fully connected layer
-        self.fc = nn.Linear(self.hidden_dim, self.output_dim)
+        self.fc = nn.Linear(cfg.model.hidden_dim, output_dim)  # type: Callable[[torch.Tensor], torch.Tensor]
 
-        self.config = config
-        self.save_hyperparameters()
+        self.scaler = scaler
+        self.cfg = cfg
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Initializing hidden state for first input with zeros
         h0 = torch.zeros(self.layer_dim, x.size(0),
-                         self.hidden_dim).requires_grad_()
+                         self.hidden_dim).requires_grad_().to(x.device)
 
         # Initializing cell state for first input with zeros
         c0 = torch.zeros(self.layer_dim, x.size(0),
-                         self.hidden_dim).requires_grad_()
-
-        out, (hn, cn) = self.model(x, (h0.detach(), c0.detach()))
+                         self.hidden_dim).requires_grad_().to(x.device)
+        lstm_out, (hn, cn) = self.model(x, (h0.detach(), c0.detach()))
 
         # Reshaping the outputs in the shape of
         # so that it can fit into the fully connected layer
-        out = out[:, -1, :]
-        out = self.fc(out)
+        lstm_out = lstm_out[:, -1, :]
+        return self.fc(lstm_out)
 
-        return out
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = get_optimizer(self.cfg.optimizer.name)
+        return optimizer(self.parameters(), **self.cfg.optimizer.hparams)
 
-    def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr,
-                                     weight_decay=self.weight_decay)
-        return optimizer
+    def training_step(
+        self, train_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-    def training_step(self, train_batch, batch_idx):
-        inputs, targets = train_batch
-        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
-        outputs = self(inputs)
-
-        loss = self.loss_fn(targets, outputs)
-        self.log("train_loss", loss, on_epoch=True, on_step=True)
-        return loss
-
-    def validation_step(self, val_batch, batch_idx):
-        inputs, targets = val_batch
-        inputs = inputs.view([inputs.shape[0], -1, self.input_dim])
-
-        outputs = self(inputs)
-
-        loss = self.loss_fn(targets, outputs)
-        self.log("val_loss", loss, on_epoch=True, on_step=True)
+        loss, outputs, targets = shared_eval_step(self, train_batch, batch_idx)
+        self.log("train_loss", loss)
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-    def validation_epoch_end(self, validation_step_outputs):
-        outputs, targets = [], []
+    def validation_step(
+        self, val_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
 
-        for out in validation_step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
+        loss, outputs, targets = shared_eval_step(self, val_batch, batch_idx)
+        self.log("val_loss", loss)
 
-        outputs = torch.cat(outputs).cpu().numpy()
-        targets = torch.cat(targets).cpu().numpy()
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
-        r2 = r2_score(targets, outputs)
+    def training_epoch_end(
+        self, training_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
 
-        outputs = self.config["scaler"].inverse_transform(outputs)
-        targets = self.config["scaler"].inverse_transform(targets)
+        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
 
-        scaled_loss = mean_squared_error(targets, outputs)
+        self.log("train_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)
 
-        self.log("val_loss_scaled", scaled_loss, on_epoch=True, on_step=False)
-        self.log("r2_scaled", r2, on_epoch=True, on_step=False)
+    def validation_epoch_end(
+        self, validation_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+
+        self.log("val_rmse_scaled_epoch", scaled_loss,
+                 on_epoch=True, on_step=False)

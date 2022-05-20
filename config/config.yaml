@@ -1,0 +1,41 @@
+defaults:
+  - _self_
+  - optimizer: adam
+  - model: mlp
+  - override hydra/hydra_logging: disabled  
+  - override hydra/job_logging: disabled  
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+run:
+  log:
+    on: True
+    wandb:
+      on: True
+      watch: False
+      project: baselines
+      entity: DanielPerezJensen
+      offline: True
+  plotting: False
+
+training:
+  seeds: [42]
+  gpu: 1
+  epochs: 25
+  batch_size: 32
+  bias: True
+  early_stopping: False
+  patience: 5
+
+data:
+  scaler_name: none
+  freq: M
+  lag: 6
+  lagged_vars: [river_flow]
+  lagged_stations: [34]
+  target_var: river_flow
+  target_stations: [34]
+  time_features: True
