@@ -150,6 +150,9 @@ class RiverFlowDataset(Dataset[Any]):
         dropped_dates = df_target_stations[df_target_stations[self.target_var].isna()]["date"]
         df_flow_lagged = df_flow_lagged.drop(df_flow_lagged.index[df_flow_lagged.date.isin(dropped_dates)])
 
+        # Data imputation
+        df_flow_lagged = df_flow_lagged.fillna(-1)
+
         # Scale data
         self.scaler = get_scaler(self.scaler_name)  # type: ScalerType
 
@@ -371,9 +374,17 @@ def generate_lags(
         # Lag each dataframe individually
         df_n = df_station_flow_agg.copy()
 
+        # Store added columns and concat after for speediness
+        add_columns = []
+
         for value in values:
             for n in range(1, n_lags + 1):
-                df_n[f"{value}_{n}"] = df_n[f"{value}"].shift(n)
+                add_columns.append(
+                    pd.Series(df_n[f"{value}"].shift(n), name=f"{value}_{n}")
+                )
+
+        add_df = pd.concat(add_columns, axis=1)
+        df_n = pd.concat((df_n, add_df), axis=1)
 
         frames.append(df_n)
 
