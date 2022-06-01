@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from os.path import join
 import json
 from typing import Tuple
 
@@ -72,28 +73,28 @@ def preprocess_static_data() -> None:
     static_submsr_edges_df.dst = static_submsr_edges_df.dst.map(m_mapper)
 
     # Below we save our data into processed folder path
-    processed_path = os.path.join("data", "processed")
+    processed_path = join("data", "processed")
     os.makedirs(processed_path, exist_ok=True)
-    os.makedirs(os.path.join(processed_path, "static"), exist_ok=True)
-    os.makedirs(os.path.join(processed_path, "graph"), exist_ok=True)
-    os.makedirs(os.path.join(processed_path, "graph", "base"), exist_ok=True)
-    os.makedirs(os.path.join(processed_path, "temporal"), exist_ok=True)
+    os.makedirs(join(processed_path, "static"), exist_ok=True)
+    os.makedirs(join(processed_path, "graph"), exist_ok=True)
+    os.makedirs(join(processed_path, "graph", "base"), exist_ok=True)
+    os.makedirs(join(processed_path, "temporal"), exist_ok=True)
 
-    static_subsub_nodes_df.to_csv(os.path.join(processed_path, "static",
-                                               "subsub.csv"))
-    static_measurement_nodes_df.to_csv(os.path.join(processed_path, "static",
-                                                    "measurement.csv"))
+    static_subsub_nodes_df.to_csv(join(processed_path, "static",
+                                       "subsub.csv"))
+    static_measurement_nodes_df.to_csv(join(processed_path, "static",
+                                            "measurement.csv"))
 
-    static_subsub_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
-                                               "subsub-flows-subsub.csv"))
-    static_msrmsr_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
-                                               "measurement-flows-measurement.csv"))
-    static_submsr_edges_df.to_csv(os.path.join(processed_path, "graph", "base",
-                                               "subsub-in-measurement.csv"))
+    static_subsub_edges_df.to_csv(join(processed_path, "graph", "base",
+                                       "subsub-flows-subsub.csv"))
+    static_msrmsr_edges_df.to_csv(join(processed_path, "graph", "base",
+                                       "measurement-flows-measurement.csv"))
+    static_submsr_edges_df.to_csv(join(processed_path, "graph", "base",
+                                       "subsub-in-measurement.csv"))
 
     # We store the mappers as well
-    subsub_path = os.path.join(processed_path, "static", "subsub.json")
-    measurement_path = os.path.join(processed_path, "static", "measurement.json")
+    subsub_path = join(processed_path, "static", "subsub.json")
+    measurement_path = join(processed_path, "static", "measurement.json")
     with open(subsub_path, "w") as s_f, open(measurement_path, "w") as m_f:
         json.dump(s_mapper, s_f)
         json.dump(m_mapper, m_f)
@@ -106,8 +107,8 @@ def preprocess_subsub_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     Preprocesses the static data about subsubwatershed nodes
     and edges between subsubwatershed nodes into properly formatted .csv files.
     """
-    unprocessed_path = os.path.join("data", "unprocessed")
-    static_subsub_path = os.path.join(unprocessed_path, "Data_Static",
+    unprocessed_path = join("data", "unprocessed")
+    static_subsub_path = join(unprocessed_path, "Data_Static",
                                       "DataCriosphere-Watershedf.txt")
 
     static_subsub_nodes_df = pd.read_csv(
@@ -206,16 +207,15 @@ def preprocess_temporal_data() -> None:
     Preprocesses the temporal river flow and ndsi/ndvi data into
     properly formatted csv files and saves it to disk.
     """
-    unprocessed_path = os.path.join("data", "unprocessed")
-    processed_path = os.path.join("data", "processed")
+    unprocessed_path = join("data", "unprocessed")
+    processed_path = join("data", "processed")
 
     flow_data_folder = "Data_RiverFlow"
     flow_data_file = "Caudales.txt"
 
     date_columns = ["day", "month", "year", "hour"]
 
-    df = pd.read_csv(os.path.join(unprocessed_path, flow_data_folder,
-                                  flow_data_file),
+    df = pd.read_csv(join(unprocessed_path, flow_data_folder, flow_data_file),
                      delimiter="\t", index_col=False,
                      names=["station_number", "day", "month", "year", "hour",
                             "river_height", "river_flow",
@@ -228,7 +228,7 @@ def preprocess_temporal_data() -> None:
     df.insert(1, 'date', date)
 
     # We gather our mapper for the nodes so index is preserved
-    with open(os.path.join(processed_path, "static", "measurement.json"), "r") as f:
+    with open(join(processed_path, "static", "measurement.json"), "r") as f:
         nodes_mapper = json.load(f)
 
     nodes_mapper = {int(k): v for k, v in nodes_mapper.items()}
@@ -236,9 +236,41 @@ def preprocess_temporal_data() -> None:
     df.station_number = df.station_number.map(nodes_mapper)
 
     # Save dataframe to disk
-    df.to_csv(os.path.join(processed_path, "temporal", "raw-measurements.csv"))
+    df.to_csv(join(processed_path, "temporal", "raw-measurements.csv"))
 
-    # TODO: Preprocess ndsi ndvi data as well
+    # Take care of the NDSI NDVI data
+    data_folder = "Data_NDSI_NDVI"
+    data_files = ["NDSI.txt", "NDVI.txt"]
+
+    # We gather our mapper for the nodes so index is preserved
+    with open(join(processed_path, "static", "subsub.json"), "r") as f:
+        subsub_mapper = json.load(f)
+
+    for data_file in data_files:
+        df = pd.read_csv(join(unprocessed_path, data_folder, data_file),
+                         delimiter="\t", index_col=False,
+                         names=["Watershed", "Subsubwatershed", "Product",
+                                "Date", "Areaini", "Areareproj", f"Surfmax",
+                                f"Surfmin", "Surfavg", "max", "min", f"avg",
+                                "Surfcloudmax", "Surfcloudmin", "Surfcloudavg",
+                                "Surfbadpixmax", "Surfbadpixmin",
+                                "Surfbadpixavg"],
+                         dtype={"Subsubwatershed": str})
+
+        # We only care about copiapo watershed
+        df = df.loc[df.Watershed == "Atacama_Copiapo"]
+
+        # We only care about the subsubwatersheds found in our mapper
+        df = df.loc[df.Subsubwatershed.isin(subsub_mapper)]
+
+        # Convert date to datetime and convert to wateryears
+        df["date"] = pd.to_datetime(df["Date"])
+        df = df.drop("Date", axis=1)
+
+        # Map subsubwatersheds to the correct index
+        df.Subsubwatershed = df.Subsubwatershed.map(subsub_mapper)
+
+        df.to_csv(join(processed_path, "temporal", f"raw-{data_file[:4]}.csv"))
 
 
 if __name__ == "__main__":
