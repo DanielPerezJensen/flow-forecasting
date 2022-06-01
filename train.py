@@ -27,23 +27,17 @@ def train(cfg: DictConfig) -> None:
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
     dataset = data.GraphFlowDataset(
                 root=processed_path,
-                graph_type=cfg.data.graph_type,
-                scaler_name=cfg.data.scaler_name,
-                freq=cfg.data.freq,
-                lag=cfg.data.lag,
-                lagged_vars=cfg.data.lagged_variables,
-                target_var=cfg.data.target_variable,
-                target_stations=cfg.data.target_stations,
-                process=True
+                process=True,
+                **cfg.data
             )
 
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
                                           lag=cfg.data.lag,
-                                          test_year_min=1999,
-                                          test_year_max=2004,
-                                          val_year_min=1974,
-                                          val_year_max=1981)
+                                          val_year_min=1999,
+                                          val_year_max=2004,
+                                          test_year_min=1974,
+                                          test_year_max=1981)
 
     train_loader = DataLoader(train, batch_size=cfg.training.batch_size,
                               num_workers=8, shuffle=True)
@@ -54,6 +48,7 @@ def train(cfg: DictConfig) -> None:
 
     # Extract some information about the graph in our dataset
     data_sample = dataset[0]
+
     metadata = data_sample.metadata()
 
     # scaler = train.scaler
@@ -75,22 +70,26 @@ def train(cfg: DictConfig) -> None:
         callbacks.append(early_stop_callback)
 
     # Type definition for logger
-    logger: Union[WandbLogger, TensorBoardLogger]
+    logger: Union[WandbLogger, TensorBoardLogger, None]
 
     # Set logger based on configuration file
-    if cfg.training.wandb.run:
-        logger = WandbLogger(save_dir=get_original_cwd(),
-                             project=cfg.training.wandb.project,
-                             entity=cfg.training.wandb.entity)
-        wandb_config = OmegaConf.to_container(
-            cfg, resolve=True, throw_on_missing=True
-        )
-        logger.experiment.config.update(wandb_config)
+    if cfg.run.log:
+        if cfg.run.log.wandb:
+            logger = WandbLogger(save_dir=get_original_cwd(),
+                                 project=cfg.run.log.wandb.project,
+                                 entity=cfg.run.log.wandb.entity,
+                                 offline=cfg.run.log.wandb.offline)
+            wandb_config = OmegaConf.to_container(
+                cfg, resolve=True, throw_on_missing=True
+            )
+            logger.experiment.config.update(wandb_config)
 
-        if cfg.training.wandb.watch:
-            logger.watch(model, log="all")
+            if cfg.run.log.wandb.watch:
+                logger.watch(model, log="all")
+        else:
+            logger = TensorBoardLogger(save_dir=get_original_cwd())
     else:
-        logger = TensorBoardLogger(save_dir=get_original_cwd())
+        logger = None
 
     trainer = pl.Trainer(gpus=cfg.training.gpu,
                          max_epochs=cfg.training.epochs,
@@ -99,10 +98,10 @@ def train(cfg: DictConfig) -> None:
                          callbacks=callbacks,
                          log_every_n_steps=10)
     trainer.fit(model, train_loader, val_loader)
-    trainer.validate(model, val_loader)
     trainer.test(model, test_loader)
 
-    wandb.finish(quiet=True)
+    if cfg.run.log.wandb:
+        wandb.finish(quiet=True)
 
 
 if __name__ == "__main__":
