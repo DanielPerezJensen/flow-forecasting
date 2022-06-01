@@ -3,6 +3,7 @@ import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks.early_stopping import EarlyStopping
+from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -17,6 +18,12 @@ import models
 import data
 
 from typing import List, Any, Union
+
+import warnings
+
+
+# We ignore the GPU warning as it does not speed up graph nn at the moment
+warnings.filterwarnings("ignore", ".*GPU available but not used.*")
 
 
 @hydra.main(config_path="config", config_name="config")
@@ -59,18 +66,17 @@ def train(cfg: DictConfig) -> None:
     with torch.no_grad():
         model(data_sample.x_dict, data_sample.edge_index_dict)
 
-    # Add early stopping callback if configuration calls for it
+    # Add various callback if configuration calls for it
     callbacks = []  # type: List[Callback]
 
     if cfg.training.early_stopping:
-        early_stop_callback = EarlyStopping(monitor="val_loss_epoch",
-                                            min_delta=0.00,
-                                            patience=cfg.training.patience,
-                                            verbose=True, mode="min")
-        callbacks.append(early_stop_callback)
+        callbacks.append(EarlyStopping(monitor="val_rmse",
+                                       min_delta=0.00,
+                                       patience=cfg.training.patience,
+                                       verbose=True, mode="min"))
 
     # Type definition for logger
-    logger: Union[WandbLogger, TensorBoardLogger, None]
+    logger: Union[WandbLogger, TensorBoardLogger, bool]
 
     # Set logger based on configuration file
     if cfg.run.log:
@@ -89,14 +95,14 @@ def train(cfg: DictConfig) -> None:
         else:
             logger = TensorBoardLogger(save_dir=get_original_cwd())
     else:
-        logger = None
+        logger = False
 
     trainer = pl.Trainer(gpus=cfg.training.gpu,
                          max_epochs=cfg.training.epochs,
                          deterministic=True,
                          logger=logger,
                          callbacks=callbacks,
-                         log_every_n_steps=10)
+                         log_every_n_steps=1)
     trainer.fit(model, train_loader, val_loader)
     trainer.test(model, test_loader)
 
