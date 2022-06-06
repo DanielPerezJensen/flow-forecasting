@@ -127,11 +127,3 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-
-data/processed
-lightning_logs
-runs.sh
-run_metrics.csv
-river-flow-prediction
-wandb
-sweeps

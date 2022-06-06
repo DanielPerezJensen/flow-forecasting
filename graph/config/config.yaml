@@ -1,0 +1,45 @@
+defaults:
+  - _self_
+  - optimizer: adam
+  - override hydra/hydra_logging: disabled  
+  - override hydra/job_logging: disabled  
+
+hydra:
+  output_subdir: null
+  run:
+    dir: .
+
+model:
+  out_channels: 32
+  n_outputs: 1
+  num_layers: 4
+
+run:
+  log:
+    on: True
+    wandb:
+      on: True
+      watch: False
+      project: baselines
+      entity: DanielPerezJensen
+      offline: True
+
+training:
+  gpu: 0
+  epochs: 50
+  batch_size: 256
+  bias: True
+  early_stopping: False
+  patience: 5
+
+data:
+  scaler_name: none
+  graph_type: base
+  freq: W
+  lag: 24
+  lagged_vars: [river_flow]
+  target_var: river_flow
+  target_stations: [0, 1, 2, 3]
+  index_features: False
+  surface_features: False
+  cloud_features: False
