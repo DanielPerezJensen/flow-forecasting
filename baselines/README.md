@@ -1,16 +1,14 @@
-# Predicting River Flow in Atacama Region Watersheds
+# Baselines
 
-This is a repository that hosts all code for my master thesis about predicting river flow in the Atacama Region of Chile using various features derived from e.g. sattelite products.
+This directory contains some of the simpler baselines that are used for comparison. 
 
-## Installation 
-To run the various scripts in this repository please use [Pipenv](https://pipenv.pypa.io/en/latest/) to create a virtual environment that contains all packages needed to run the code in this project. For this you can use the Pipfile and Pipfile.lock, instructions for using Pipenv can be found [here](https://pipenv-fork.readthedocs.io/en/latest/basics.html).
+## Baselines Used
+Source: Wikipedia
+### MLP
+A multilayer perceptron (MLP) is a fully connected class of feedforward artificial neural network (ANN). The term MLP is used ambiguously, sometimes loosely to mean any feedforward ANN, sometimes strictly to refer to networks composed of multiple layers of perceptrons (with threshold activation); see § Terminology. Multilayer perceptrons are sometimes colloquially referred to as "vanilla" neural networks, especially when they have a single hidden layer
 
-Keep in mind that the pipenv installation will not include a pytorch installation. This will need to be installed separately. Instructions for this can be found on the [pytorch website](https://pytorch.org/get-started/locally/).
+### LSTM
+Long short-term memory is an artificial neural network used in the fields of artificial intelligence and deep learning. Unlike standard feedforward neural networks, LSTM has feedback connections. Such a recurrent neural network can process not only single data points (such as images), but also entire sequences of data (such as speech or video). For example, LSTM is applicable to tasks such as unsegmented, connected handwriting recognition, speech recognition, machine translation, robot control, video games, and healthcare. LSTM has become the most cited neural network of the 20th century.
 
-Once you have installed the packages needed, you can run all code in this repository. Instructions for separate files will be added as the files are created for this project.
-
-## Acknowledgements
-This project was created with help from:
-* Miltos Kofinas from the University of Amsterdam
-* Adrien Tavernier from LICA-UDA
-* Ayón García Piña from LICA-UDA
+### GRU
+Gated recurrent units (GRUs) are a gating mechanism in recurrent neural networks, introduced in 2014 by Kyunghyun Cho et al. The GRU is like a long short-term memory (LSTM) with a forget gate, but has fewer parameters than LSTM, as it lacks an output gate.[3] GRU's performance on certain tasks of polyphonic music modeling, speech signal modeling and natural language processing was found to be similar to that of LSTM. GRUs have been shown to exhibit better performance on certain smaller and less frequent datasets.
