@@ -25,7 +25,7 @@ def inverse_transform(
     Transforms values in df columns back to normal values using sklearn scaler
     """
     for col in columns:
-        df[col] = scaler.inverse_transform(df[col])
+        df[col] = scaler.inverse_transform(df[col].to_numpy().reshape(-1, 1))
 
     return df
 
@@ -57,11 +57,9 @@ def predict(
 
         outputs = model(inp)
 
-        # We only care about the pastillo station as that is
-        # what we are predicting TODO: Maybe add target stations
         inputs.append(inp.detach().cpu().squeeze().numpy()[:, 0])
-        predictions.append(outputs.detach().cpu().numpy().item())
-        values.append(targets.detach().cpu().numpy().item())
+        predictions.append(outputs.detach().cpu().numpy().reshape((model.cfg.data.n_preds)))
+        values.append(targets.detach().cpu().numpy().reshape((model.cfg.data.n_preds)))
 
     return np.array(inputs), np.array(predictions), np.array(values)
 
@@ -80,35 +78,24 @@ def format_predictions(
         scaler: optional arg, only used if we used a scaler during training
     """
 
-    df_result = pd.DataFrame(data={"value": values, "prediction": predictions},
-                             index=index)
+    df_result = pd.DataFrame(index=index)
 
     # Add previous values as lagged values
-    input_cols = [f"river_flow_{i + 1}" for i in range(len(inputs[0]))]
+    input_cols = [f"river_flow-{i + 1}" for i in range(len(inputs[0]))]
     inputs = inputs.T
     df_result = df_result.assign(**dict(zip(input_cols, inputs)))
 
-    columns = input_cols + ["value", "prediction"]
+    prediction_cols = [f"prediction_{i + 1}" for i in range(len(predictions[0]))]
+    predictions = predictions.T
+    df_result = df_result.assign(**dict(zip(prediction_cols, predictions)))
+
+    value_cols = [f"river_flow+{i + 1}" for i in range(len(values[0]))]
+    values = values.T
+    df_result = df_result.assign(**dict(zip(value_cols, values)))
+
+    columns = input_cols + prediction_cols + value_cols
 
     if scaler is not None:
         df_result = inverse_transform(scaler, df_result, columns)
 
     return df_result
-
-
-def calculate_metrics(results_df: pd.DataFrame) -> Dict[str, float]:
-    """
-    Calculates various metrics on a df containing actual targets
-    and predicted targets
-    Args:
-        targets
-        predictions
-    """
-    return {
-        "mse": mean_squared_error(results_df.value,
-                                  results_df.prediction),
-        "rmse": mean_squared_error(results_df.value,
-                                   results_df.prediction,
-                                   squared=False),
-        "r2": r2_score(results_df.value, results_df.prediction)
-    }

@@ -6,50 +6,6 @@ import pandas as pd
 from torch.utils.data import DataLoader
 
 
-def plot_predictions(df_result: pd.DataFrame) -> None:
-    """
-    This function plots the predictions given in df_result
-    against the actual ground truth values.
-    Args:
-        df_result: dataframe coming from utils.format_predictions
-    """
-    data = []
-
-    value = go.Scatter(
-        x=df_result.index,
-        y=df_result.value,
-        mode="lines",
-        name="values",
-        marker=dict(),
-        text=df_result.index,
-        line=dict(color="rgba(0,0,0, 0.3)"),
-    )
-
-    data.append(value)
-
-    prediction = go.Scatter(
-        x=df_result.index,
-        y=df_result.prediction,
-        mode="lines",
-        line={"dash": "dot"},
-        name="predictions",
-        marker=dict(),
-        text=df_result.index,
-        opacity=0.8,
-    )
-
-    data.append(prediction)
-
-    layout = dict(
-        title="Predictions vs Actual Values for the dataset",
-        xaxis=dict(title="Time", ticklen=5, zeroline=False),
-        yaxis=dict(title="Value", ticklen=5, zeroline=False),
-    )
-
-    fig = go.Figure(data=data, layout=layout)
-    fig.show()
-
-
 def plot_ind_predictions(df_result: pd.DataFrame) -> None:
     """
     This function randomly samples 16 datapoints from the test set and
@@ -58,10 +14,11 @@ def plot_ind_predictions(df_result: pd.DataFrame) -> None:
     Args:
         df_result: dataframe coming from utils.format_predictions
     """
-    col_list = df_result.columns
-    lag_cols = [i[0] for i in
-                col_list.str.findall("^river_flow_.*") if len(i) > 0][::-1]
-    lag_cols.append("value")
+    df_result.index = pd.to_datetime(df_result.index)
+
+    lagged_cols = df_result.columns[df_result.columns.str.match("river_flow-\\d")]
+    target_cols = df_result.columns[df_result.columns.str.match("river_flow\\+\\d")]
+    prediction_cols = df_result.columns[df_result.columns.str.match("prediction_\\d")]
 
     n = 16
 
@@ -77,22 +34,33 @@ def plot_ind_predictions(df_result: pd.DataFrame) -> None:
     row_idx, col_idx = 1, 1
 
     for index, row in sampled.iterrows():
-        data = row[lag_cols].tolist()
-        x = list(range(1, len(lag_cols) + 1))
+        lagged = row[lagged_cols].tolist()
+        targets = row[target_cols].tolist()
+        predictions = row[prediction_cols].tolist()
 
-        x_pred = [len(data) - 1, len(data)]
-        y_pred = [data[-2], row["prediction"]]
+        x = list(range(1, len(lagged) + 1))
+        x_after = [x[-1]] + list(range(x[-1] + 1, x[-1] + 1 + len(lagged)))
+
+        targets = [lagged[-1]] + targets
+        predictions = [lagged[-1]] + predictions
 
         fig.add_trace(go.Scatter(
                         x=x,
-                        y=row[lag_cols],
-                        line={"dash": "solid"},
+                        y=lagged,
+                        line={"dash": "solid", "color": "orange"},
                     ), row_idx, col_idx)
 
         fig.add_trace(go.Scatter(
-                        x=x_pred,
-                        y=y_pred,
-                        line={"dash": "dot"},
+                        x=x_after,
+                        y=targets,
+                        line={"dash": "dot", "color": "green"},
+                    ), row_idx, col_idx)
+
+        fig.add_trace(go.Scatter(
+                        x=x_after,
+                        y=predictions,
+
+                        line={"dash": "dot", "color": "blue"},
                     ), row_idx, col_idx)
 
         row_idx += 1

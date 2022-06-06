@@ -77,7 +77,9 @@ def train(cfg: DictConfig) -> None:
         else:
             input_dim = sample[0].shape[1]
 
-        output_dim = sample[1].shape[0]
+        output_dim = sample[1].shape[1]
+
+        print(input_dim)
 
         # Retrieve scaler used to scale values in dataset
         scaler = dataset.scaler
@@ -100,7 +102,7 @@ def train(cfg: DictConfig) -> None:
             callbacks.append(early_stop_callback)
 
         # Type definition for logger
-        logger: Union[Union[WandbLogger, TensorBoardLogger], None]
+        logger: Union[Union[WandbLogger, TensorBoardLogger], bool]
 
         # Set logger based on configuration file
         if cfg.run.log:
@@ -119,7 +121,7 @@ def train(cfg: DictConfig) -> None:
             else:
                 logger = TensorBoardLogger(save_dir=get_original_cwd())
         else:
-            logger = None
+            logger = False
 
         trainer = pl.Trainer(gpus=cfg.training.gpu, log_every_n_steps=10,
                              max_epochs=cfg.training.epochs, logger=logger)
@@ -129,12 +131,11 @@ def train(cfg: DictConfig) -> None:
             wandb.finish(quiet=True)
 
         inputs, outputs, predictions = utils.predict(model, test_loader)
-        index = np.array(list(test.data_date_dict.keys()))
+        index = list(test.data_date_dict.keys())
         df_results = utils.format_predictions(inputs, outputs,
-                                              predictions, index)
+                                              predictions, index, scaler)
 
         if cfg.run.plotting:
-            plotting.plot_predictions(df_results)
             plotting.plot_ind_predictions(df_results)
 
 
