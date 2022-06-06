@@ -23,7 +23,7 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
-class GraphFlowDataset():
+class GraphFlowDataset(Dataset):
     def __init__(
         self,
         root: Optional[Union[str, os.PathLike[Any]]] = None,
@@ -39,7 +39,6 @@ class GraphFlowDataset():
         cloud_features: bool = False,
         process: bool = False
     ) -> None:
-
         self.root = root if root else join("data", "processed")
         self.graph_type = graph_type if graph_type else "base"
 
@@ -67,7 +66,11 @@ class GraphFlowDataset():
             self.process(root)
 
     def process(self, root: Union[str, os.PathLike[Any]]) -> None:
+        """
+        function: process
 
+        Processes the data found in root
+        """
         if not self.root:
             raise ValueError
 
@@ -126,10 +129,10 @@ class GraphFlowDataset():
                 else:
                     date_ndsi_ndvi_features = torch.from_numpy(df_ndsi_ndvi_date.loc[:, df_ndsi_ndvi_date.columns.str.match(".*_\\d")].to_numpy())
 
-                date_ndsi_ndvi_features = torch.cat([subsubwatersheds_feats, date_ndsi_ndvi_features], dim=-1)
+                subsub_features = torch.cat([subsubwatersheds_feats, date_ndsi_ndvi_features], dim=-1)
 
             else:
-                date_ndsi_ndvi_features = subsubwatersheds_feats
+                subsub_features = subsubwatersheds_feats
 
             # Extract date targets and convert to tensor
             df_date_targets = df_date.loc[df_date["station_number"].isin(self.target_stations)]
@@ -139,7 +142,7 @@ class GraphFlowDataset():
 
             data["measurement"].x = date_features.float()
             data["measurement"].y = date_targets.float()
-            data["subsub"].x = date_ndsi_ndvi_features.float()
+            data["subsub"].x = subsub_features.float()
 
             data["measurement", "flows", "measurement"].edge_index = msr_flows_msr
             data["measurement", "flows", "measurement"].edge_attr = msr_flows_msr_attr.float()
@@ -154,10 +157,20 @@ class GraphFlowDataset():
         self.data_list = list(self.data_date_dict.values())
 
     def set_data(self, date: np.datetime64, value: HeteroData) -> None:
+        """
+        class function: set_data
+
+        Sets a certain value (or graph) on a certain date in the dataset
+        """
         self.data_date_dict[date] = value
         self.data_list = list(self.data_date_dict.values())
 
     def get_item_by_date(self, date: np.datetime64) -> HeteroData:
+        """
+        class function: get_item_by_date
+
+        Returns graph based on the date provided
+        """
         return self.data_date_dict[date]
 
     def __repr__(self) -> str:
@@ -172,10 +185,16 @@ class GraphFlowDataset():
 
 def split_dataset(
     dataset: GraphFlowDataset,
-    freq: str = "M", lag: int = 6,
+    freq: str, lag: int,
     val_year_min: int = 1998, val_year_max: int = 2002,
     test_year_min: int = 2013, test_year_max: int = 2019
 ) -> Tuple[GraphFlowDataset, GraphFlowDataset, GraphFlowDataset]:
+    """
+    function: split_dataset
+
+    Splits dataset into training, validation and testing set according to
+    the years provided.
+    """
 
     assert freq in ["W", "M"]
     assert val_year_min < val_year_max
@@ -229,11 +248,11 @@ def generate_lags(
     """
     frames = []
 
-    # Iterate over dataframes split by station number
-    for _, df_station_flow_agg in df.groupby(groupby_col):
+    # Iterate over dataframes split by groupby_col
+    for _, group in df.groupby(groupby_col):
 
         # Lag each dataframe individually
-        df_n = df_station_flow_agg.copy()
+        df_n = group.copy()
 
         # Store added columns and concat after for speediness
         add_columns = []
@@ -281,7 +300,6 @@ def load_nodes_csv(
     function: load_nodes_csv
 
     Loads nodes from provided csv and scales using scaler name.
-    Return scaled data and scaler.
     """
     df = pd.read_csv(path, index_col=0, **kwargs)
 
@@ -299,6 +317,11 @@ def load_edges_csv(
     scaler_name: str = "none",
     **kwargs: Any
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    function: load_edges_csv
+
+    Loads edges and edge attributes from provided csv and scales appropiately.
+    """
     df = pd.read_csv(path, index_col=0, **kwargs)
 
     # Gather edge index as 2 dimensional tensor
@@ -327,7 +350,6 @@ def load_and_aggregate_flow_data(
     function: load_and_aggregate_flow_data
 
     Reads river flow data and aggregates it to the frequency specified in freq.
-    Return aggregated river flow data.
     """
 
     # Import river flow data and only preserve datapoints after 1965
@@ -369,13 +391,11 @@ def load_and_aggregate_flow_data(
 def gather_ndsi_ndvi_data(
     freq: str = "W", index_features: bool = True,
     surface_features: bool = False, cloud_features: bool = False
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """
-    This function returns the full processed data using various arguments
-    as a pd.DataFrame
-    Args:
-        watersheds: list of strings denoting what watersheds to use from data
-        lag: amount of time lag to be used as features
+    function: gather_ndsi_ndvi_data
+
+    Gather ndsi ndvi data and returns whatever is indicated by boolean flags
     """
     processed_folder_path = join("data", "processed")
 
@@ -414,12 +434,9 @@ def aggregate_area_data(
     freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame, column: str
 ) -> pd.DataFrame:
     """
-    This function will correctly aggregate area data given the column
-    Args:
-        freq: frequency of aggregation
-        df_NDSI: dataframe containing filtered NDSI values
-        df_NDVI: dataframe containing filtered NDVI values
-        column: column name to aggregate, must contain 'Surf'
+    function: aggregate_area_data
+
+    This function correctly aggregates area data given the column
     """
     assert "Surf" in column
 
@@ -458,10 +475,9 @@ def aggregate_index_data(
     freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame
 ) -> pd.DataFrame:
     """
-    Returns the aggregated NDSI NDVI data with lagged variables
-    Args:
-        df_NDSI: dataframe containing filtered NDSI values
-        df_NDVI: dataframe containing filtered NDVI values
+    function: aggregate_index_data
+
+    Aggregates raw index data
     """
 
     # Take average of NDSI values for each month and aggregate
