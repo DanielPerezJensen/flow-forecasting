@@ -2,6 +2,7 @@
 This file contains various models used throughout the project
 """
 import torch
+import numpy as np
 import pytorch_lightning as pl
 from torch import nn
 from sklearn.metrics import mean_squared_error, r2_score
@@ -25,7 +26,11 @@ def shared_eval_step(
     inputs, targets = batch
 
     outputs = model(inputs)
-    loss = model.loss_fn(targets, outputs)
+    outputs = outputs.view(-1,
+                           len(model.cfg.data.target_stations),
+                           model.output_dim)
+
+    loss = model.loss_fn(outputs, targets)
 
     return loss, outputs, targets
 
@@ -39,8 +44,8 @@ def shared_eval_epoch_end(
         outputs.append(out["outputs"])
         targets.append(out["targets"])
 
-    np_outputs = torch.cat(outputs).cpu().detach().numpy()
-    np_targets = torch.cat(targets).cpu().detach().numpy()
+    np_outputs = np.squeeze(torch.cat(outputs).cpu().detach().numpy(), axis=1)
+    np_targets = np.squeeze(torch.cat(targets).cpu().detach().numpy(), axis=1)
 
     descaled_outputs = model.scaler.inverse_transform(np_outputs)
     descaled_targets = model.scaler.inverse_transform(np_targets)
@@ -74,6 +79,9 @@ class MLP(pl.LightningModule):
         self.cfg = cfg
         self.loss_fn = nn.MSELoss()
         self.scaler = scaler
+
+        self.input_dim = input_dim
+        self.output_dim = output_dim
 
         self.layers = []  # type: List[nn.Module]
         layer_sizes = [input_dim] + list(self.cfg.model.layers)

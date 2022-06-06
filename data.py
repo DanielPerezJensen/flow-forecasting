@@ -29,6 +29,7 @@ class RiverFlowDataset(Dataset[Any]):
         scaler_name: str = "none",
         freq: str = "M",
         lag: int = 6,
+        n_preds: int = 6,
         lagged_vars: Optional[List[str]] = None,
         lagged_stations: Optional[List[int]] = None,
         target_var: str = "river_flow",
@@ -42,29 +43,15 @@ class RiverFlowDataset(Dataset[Any]):
         """
         RiverFlowDataset:
 
-        This class contains all data handling code, and creates a properly
+        This class contains all data handling code, aListnd creates a properly
         formatted PyTorch Dataset
-
-        Args:
-            root: root directory of the preprocessed data
-            scaler_name: name of the scaler retrieved using get_scaler()
-            freq: frequency of datapoints either M or W
-            lag: amount of lag we use as features for prediction
-            lagged_vars: variables in data to lag
-            lagged_stations: stations to lag and consider as feature
-            target_var: variable we wish to predict
-            target_stations: stations we wish to predict target_var of
-            index_features: include ndsi/ndvi as a feature
-            surface_features: include surf ndsi/ndvi as a feature
-            cloud_features: include cloud ndsi/ndvi as a feature
-            time_features: include time as a feature
-            process: process the dataset or not, only needed for full dataset
         """
         self.root = root if root else os.path.join("data", "processed")
 
         self.freq = freq
         self.scaler_name = scaler_name
         self.lag = lag
+        self.n_preds = n_preds
 
         self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
@@ -141,9 +128,9 @@ class RiverFlowDataset(Dataset[Any]):
             df_features = pd.merge(df_features, cloud_df, how="left", on="date")
             self.lagged_vars += ["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
 
-        # print(df_features)
-        df_flow_lagged = generate_lags(df_features, self.lagged_vars,
-                                       self.lag)
+        df_flow_lagged = generate_lags(df_features, self.lagged_vars, self.lag)
+
+        df_flow_lagged = generate_lags(df_flow_lagged, [self.target_var], -self.n_preds)
 
         # Drop any date for which any of the target stations has no measurement
         df_target_stations = df_flow_lagged[df_flow_lagged.station_number.isin(self.target_stations)]
@@ -171,6 +158,10 @@ class RiverFlowDataset(Dataset[Any]):
 
         unique_dates = df_flow_lagged.date.unique()
 
+        date = np.datetime64('2001-10-31')
+
+        df_stations_date = df_features.loc[df_features["station_number"].isin(self.lagged_stations)]
+
         for date in unique_dates:
             date = np.datetime64(date, "D")
 
@@ -179,12 +170,12 @@ class RiverFlowDataset(Dataset[Any]):
             df_stations_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.lagged_stations)]
 
             # Concatenate all lagged variables we want into one input vector
-            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.match("river_flow_\\d")]
+            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("river_flow-\\d")]
 
             date_features = df_date_features.to_numpy(dtype=np.float32).T
 
             if self.time_features:
-                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.match("(sin)|(cos)_.*")]
+                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("((sin)|(cos))_.*")]
 
                 # Only add one time feature as they are the same across the stations
                 time_features = df_time_features.to_numpy(dtype=np.float32)[0, :]
@@ -195,30 +186,30 @@ class RiverFlowDataset(Dataset[Any]):
                 date_features = np.append(date_features, time_features, axis=1)
 
             if self.index_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndsi_avg_\\d")]
+                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_avg-\\d")]
                 ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
 
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndvi_avg_\\d")]
+                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_avg-\\d")]
                 ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
 
                 ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
                 date_features = np.append(date_features, ndsi_ndvi_feature, axis=1)
 
             if self.surface_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndsi_Surfavg_\\d")]
+                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_Surfavg-\\d")]
                 ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
 
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndvi_Surfavg_\\d")]
+                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_Surfavg-\\d")]
                 ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
 
                 ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
                 date_features = np.append(date_features, ndsi_ndvi_feature, axis=1)
 
             if self.cloud_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndsi_Surfcloudavg_\\d")]
+                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_Surfcloudavg-\\d")]
                 ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
 
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.match("ndvi_Surfcloudavg_\\d")]
+                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_Surfcloudavg-\\d")]
                 ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
 
                 ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
@@ -228,7 +219,8 @@ class RiverFlowDataset(Dataset[Any]):
 
             # Extract targets
             df_target_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.target_stations)]
-            date_targets = torch.from_numpy(df_target_date[self.target_var].to_numpy(dtype=np.float32))
+            df_targets_date = df_target_date.loc[:, df_target_date.columns.str.fullmatch("river_flow\\+\\d")]
+            date_targets = torch.from_numpy(df_targets_date.to_numpy(dtype=np.float32))
 
             self.data_date_dict[date] = (date_features, date_targets)
 
@@ -365,8 +357,14 @@ def generate_lags(
     Generates a dataframe with columns denoting lagged value up to n_lags,
     does this per station number so there is no overlap between stations.
     """
-    station_numbers = df.station_number.unique()
     frames = []
+
+    # We use - if the lags are negative and + if the lags are positive
+    sig = n_lags / abs(n_lags)
+    if sig == 1:
+        sign = "-"
+    elif sig == -1:
+        sign = "+"
 
     # Iterate over dataframes split by station number
     for _, df_station_flow_agg in df.groupby("station_number"):
@@ -378,10 +376,16 @@ def generate_lags(
         add_columns = []
 
         for value in values:
-            for n in range(1, n_lags + 1):
-                add_columns.append(
-                    pd.Series(df_n[f"{value}"].shift(n), name=f"{value}_{n}")
-                )
+            if sign == "-":
+                for n in range(1, n_lags + 1):
+                    add_columns.append(
+                        pd.Series(df_n[f"{value}"].shift(n), name=f"{value}{sign}{n}")
+                    )
+            elif sign == "+":
+                for n in range(0, -(n_lags)):
+                    add_columns.append(
+                        pd.Series(df_n[f"{value}"].shift(-n), name=f"{value}{sign}{n}")
+                    )
 
         add_df = pd.concat(add_columns, axis=1)
         df_n = pd.concat((df_n, add_df), axis=1)
@@ -533,8 +537,11 @@ def aggregate_index_data(
 
 
 if __name__ == "__main__":
-    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34], target_stations=[34], scaler_name="none", process=True, time_features=True, index_features=True)
-    sample = x[0]
+    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34], n_preds=6, target_stations=[34], scaler_name="none", process=True, time_features=True, index_features=False)
 
-    print(sample[0].shape)
-    print(sample[1].shape)
+    date = np.datetime64('2001-09-30')
+
+    sample = x.get_item_by_date(date)
+
+    print(date)
+    print(sample)
