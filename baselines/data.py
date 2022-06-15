@@ -14,6 +14,8 @@ from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
 
+from omegaconf import DictConfig, OmegaConf
+
 from typing import Type, Optional, Tuple, List, Union, Dict, Any, Callable
 
 ScalerType = Union[MinMaxScaler, StandardScaler,
@@ -255,24 +257,23 @@ class RiverFlowDataset(Dataset[Any]):
 
 
 def split_dataset(
-    dataset: RiverFlowDataset,
-    freq: str = "M", lag: int = 6,
+    dataset: RiverFlowDataset, cfg: DictConfig,
     val_year_min: int = 1998, val_year_max: int = 2002,
     test_year_min: int = 2013, test_year_max: int = 2019
 ) -> Tuple[RiverFlowDataset, RiverFlowDataset, RiverFlowDataset]:
 
-    assert freq in ["W", "M"]
+    assert cfg.freq in ["W", "M"]
     assert val_year_min < val_year_max
     assert test_year_min < test_year_max
 
-    if freq == "M":
-        offset = pd.tseries.offsets.DateOffset(months=lag)
-    if freq == "W":
-        offset = pd.tseries.offsets.DateOffset(weeks=lag)
+    if cfg.freq == "M":
+        offset = pd.tseries.offsets.DateOffset(months=cfg.lag)
+    if cfg.freq == "W":
+        offset = pd.tseries.offsets.DateOffset(weeks=cfg.lag)
 
-    train_dataset = RiverFlowDataset()
-    val_dataset = RiverFlowDataset()
-    test_dataset = RiverFlowDataset()
+    train_dataset = RiverFlowDataset(**cfg)
+    val_dataset = RiverFlowDataset(**cfg)
+    test_dataset = RiverFlowDataset(**cfg)
 
     val_start = np.datetime64(str(val_year_min), "D")
     val_end = np.datetime64(str(val_year_max), "D")
