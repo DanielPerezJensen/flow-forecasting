@@ -16,12 +16,11 @@ numpy = "==1.22.3"
 tqdm = "==4.64.0"
 scikit-learn = "==1.0.2"
 plotly = "==5.7.0"
-pytorch-lightning = "==1.6.3"
-wandb = "==0.12.16"
+pytorch-lightning = "*"
+wandb = "*"
 hydroeval = "==0.1.0"
 networkx = "==2.8"
 pyvis = "==0.2.0"
-# decorator = "==5.1.1"
 matplotlib = "==3.5.2"
 tensorboard = "==2.9.0"
 torch-scatter = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch_scatter-2.0.9-cp38-cp38-linux_x86_64.whl"}
@@ -31,6 +30,7 @@ torch-spline-conv = {file = "https://data.pyg.org/whl/torch-1.11.0%2Bcu113/torch
 torch-geometric = "*"
 mypy = "==0.950"
 hydra-core = "==1.1.2"
+torchmetrics = "==0.8.2"
 
 [dev-packages]
 
