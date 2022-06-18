@@ -8,14 +8,43 @@ from torch import nn
 from sklearn.metrics import mean_squared_error, r2_score
 from omegaconf import DictConfig, OmegaConf
 
+import hydroeval as he
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
 
+from torch import Tensor
 from typing import Any, Optional, Tuple, List, Dict, Callable, Type, Union
+import numpy.typing as npt
+
 
 ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
+
+
+def get_evaluation_measures(
+    predictions: npt.NDArray[np.float32],
+    targets: npt.NDArray[np.float32]
+) -> Dict[str, float]:
+    """
+    function:
+
+    Returns a dictionary of evaluation measures according to provided
+    predictions and targets
+    """
+    nse_outs = []
+
+    for p, t in zip(predictions.T, targets.T):
+        nse_outs.append(he.evaluator(he.nse, p, t)[0])
+
+    nse_mean = np.average(nse_outs)
+
+    eval_dict = {
+        "rmse": mean_squared_error(targets, predictions, squared=False),
+        "nse": nse_mean,
+    }
+
+    return eval_dict
 
 
 def shared_eval_step(
@@ -37,7 +66,7 @@ def shared_eval_step(
 
 def shared_eval_epoch_end(
     model: pl.LightningModule, step_outputs: List[Dict[str, torch.Tensor]]
-) -> float:
+) -> Dict[str, float]:
     outputs, targets = [], []
 
     for out in step_outputs:
@@ -50,10 +79,9 @@ def shared_eval_epoch_end(
     descaled_outputs = model.scaler.inverse_transform(np_outputs)
     descaled_targets = model.scaler.inverse_transform(np_targets)
 
-    scaled_loss = mean_squared_error(descaled_targets, descaled_outputs,
-                                     squared=False)
+    eval_dict = get_evaluation_measures(descaled_outputs, descaled_targets)
 
-    return scaled_loss
+    return eval_dict
 
 
 def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
@@ -95,7 +123,7 @@ class MLP(pl.LightningModule):
 
         self.model = nn.Sequential(*self.layers)  # type: Callable[[torch.Tensor], torch.Tensor]
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = torch.flatten(x, start_dim=1)
         return self.model(x)
 
@@ -121,23 +149,47 @@ class MLP(pl.LightningModule):
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
+    def test_step(
+        self, test_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
+
+        loss, outputs, targets = shared_eval_step(self, test_batch, batch_idx)
+        self.log("train_loss", loss)
+
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
+
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, training_step_outputs)
 
-        self.log("train_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"train_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def validation_epoch_end(
         self, validation_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, validation_step_outputs)
 
-        self.log("val_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"val_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
+
+    def test_epoch_end(
+        self, test_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        eval_dict = shared_eval_epoch_end(self, test_step_outputs)
+
+        for k in eval_dict.copy():
+            eval_dict[f"test_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
 
 
 class GRU(pl.LightningModule):
@@ -211,23 +263,47 @@ class GRU(pl.LightningModule):
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
+    def test_step(
+        self, test_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
+
+        loss, outputs, targets = shared_eval_step(self, test_batch, batch_idx)
+        self.log("train_loss", loss)
+
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
+
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, training_step_outputs)
 
-        self.log("train_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"train_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def validation_epoch_end(
         self, validation_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, validation_step_outputs)
 
-        self.log("val_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"val_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
+
+    def test_epoch_end(
+        self, test_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        eval_dict = shared_eval_epoch_end(self, test_step_outputs)
+
+        for k in eval_dict.copy():
+            eval_dict[f"test_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
 
 
 class LSTM(pl.LightningModule):
@@ -299,20 +375,44 @@ class LSTM(pl.LightningModule):
 
         return {'loss': loss, 'outputs': outputs, 'targets': targets}
 
+    def test_step(
+        self, test_batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
+
+        loss, outputs, targets = shared_eval_step(self, test_batch, batch_idx)
+        self.log("train_loss", loss)
+
+        return {'loss': loss, 'outputs': outputs, 'targets': targets}
+
     def training_epoch_end(
         self, training_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, training_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, training_step_outputs)
 
-        self.log("train_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"train_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def validation_epoch_end(
         self, validation_step_outputs: List[Dict[str, torch.Tensor]]
     ) -> None:
 
-        scaled_loss = shared_eval_epoch_end(self, validation_step_outputs)
+        eval_dict = shared_eval_epoch_end(self, validation_step_outputs)
 
-        self.log("val_rmse_scaled_epoch", scaled_loss,
-                 on_epoch=True, on_step=False)
+        for k in eval_dict.copy():
+            eval_dict[f"val_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
+
+    def test_epoch_end(
+        self, test_step_outputs: List[Dict[str, torch.Tensor]]
+    ) -> None:
+
+        eval_dict = shared_eval_epoch_end(self, test_step_outputs)
+
+        for k in eval_dict.copy():
+            eval_dict[f"test_{k}"] = eval_dict.pop(k)
+
+        self.log_dict(eval_dict, on_epoch=True)
