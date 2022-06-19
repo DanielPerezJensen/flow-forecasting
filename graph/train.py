@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import pytorch_lightning as pl
 from torch_geometric.loader import DataLoader
 from pytorch_lightning.callbacks import Callback
@@ -20,6 +21,8 @@ import data
 from typing import List, Any, Union
 
 import warnings
+
+LoggerType = Union[Union[WandbLogger, TensorBoardLogger], bool]
 
 
 # We ignore the GPU warning as it does not speed up graph nn at the moment
@@ -75,10 +78,27 @@ def train(cfg: DictConfig) -> None:
                                        patience=cfg.training.patience,
                                        verbose=True, mode="min"))
 
-    # Type definition for logger
-    logger: Union[WandbLogger, TensorBoardLogger, bool]
-
     # Set logger based on configuration file
+    logger = set_logger(model, cfg)
+
+    trainer = pl.Trainer(gpus=cfg.training.gpu,
+                         max_epochs=cfg.training.epochs,
+                         deterministic=True,
+                         logger=logger,
+                         callbacks=callbacks,
+                         log_every_n_steps=1)
+
+    trainer.fit(model, train_loader, val_loader)
+    trainer.test(model, test_loader)
+
+    if cfg.run.log.wandb:
+        wandb.finish(quiet=True)
+
+
+def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
+
+    logger: LoggerType
+
     if cfg.run.log:
         if cfg.run.log.wandb:
             logger = WandbLogger(save_dir=get_original_cwd(),
@@ -97,17 +117,7 @@ def train(cfg: DictConfig) -> None:
     else:
         logger = False
 
-    trainer = pl.Trainer(gpus=cfg.training.gpu,
-                         max_epochs=cfg.training.epochs,
-                         deterministic=True,
-                         logger=logger,
-                         callbacks=callbacks,
-                         log_every_n_steps=1)
-    trainer.fit(model, train_loader, val_loader)
-    trainer.test(model, test_loader)
-
-    if cfg.run.log.wandb:
-        wandb.finish(quiet=True)
+    return logger
 
 
 if __name__ == "__main__":

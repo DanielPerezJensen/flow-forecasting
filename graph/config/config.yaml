@@ -11,7 +11,6 @@ hydra:
 
 model:
   out_channels: 32
-  n_outputs: 1
   num_layers: 4
 
 run:
@@ -37,6 +36,8 @@ data:
   graph_type: base
   freq: W
   lag: 24
+  n_preds: 6
+  sequential: False
   lagged_vars: [river_flow]
   target_var: river_flow
   target_stations: [0, 1, 2, 3]

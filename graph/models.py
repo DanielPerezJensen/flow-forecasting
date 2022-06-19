@@ -33,7 +33,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         self.model = HeteroGLSTM(cfg.model.num_layers, cfg.model.out_channels,
                                  metadata)
-        self.linear = nn.Linear(cfg.model.out_channels, cfg.model.n_outputs)
+        self.linear = nn.Linear(cfg.model.out_channels, cfg.data.n_preds)
 
         self.activation = nn.ReLU()
         self.loss_fn = nn.MSELoss()
@@ -144,7 +144,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
         # so only reshape to amount of target stations
         target = target.reshape(-1, n_target_stations)
 
-        loss = self.loss_fn(target, output)
+        loss = self.loss_fn(output, target)
 
         return loss, output, target
 
@@ -181,26 +181,17 @@ def get_evaluation_measures(
     Returns a dictionary of evaluation measures according to provided
     predictions and targets
     """
+
     nse_outs = []
-    kge_outs = []
-    kge_prime_outs = []
 
     for p, t in zip(predictions.T, targets.T):
         nse_outs.append(he.evaluator(he.nse, p, t)[0])
-        kge_outs.append(he.evaluator(he.kge, p, t)[0])
-        kge_prime_outs.append(he.evaluator(he.kgeprime, p, t)[0])
 
     nse_mean = np.average(nse_outs)
-    kge_mean = np.average(kge_outs)
-    kge_prime_mean = np.average(kge_prime_outs)
 
     eval_dict = {
-        "rmse": mean_squared_error(targets, predictions, squared=False),
-        "r2_score": r2_score(targets, predictions),
+        "rmse": mean_squared_error(predictions, targets, squared=False),
         "nse": nse_mean,
-        "nnse": 1 / (2 - nse_mean),
-        "kge": kge_mean,
-        "kgeprime": kge_prime_mean
     }
 
     return eval_dict
