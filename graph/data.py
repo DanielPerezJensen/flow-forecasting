@@ -96,12 +96,8 @@ class GraphFlowDataset(Dataset):
         graph_type: Optional[str] = None,
         scaler_name: str = "none",
         freq: str = "M",
-        lag: int = 6,
-        n_preds: int = 1,
         sequential: bool = False,
         lagged_vars: Optional[List[str]] = None,
-        target_var: str = "river_flow",
-        target_stations: Optional[List[int]] = None,
         index_features: bool = False,
         surface_features: bool = False,
         cloud_features: bool = False,
@@ -112,18 +108,22 @@ class GraphFlowDataset(Dataset):
 
         self.freq = freq
         self.scaler_name = scaler_name
-        self.lag = lag
-        self.n_preds = n_preds
+
+        # Set lag and amount of prediction according to frequency
+        if self.freq == "M":
+            self.lag = 6
+        elif self.freq == "W":
+            self.lag = 24
+
+        self.n_preds = self.lag
+
         self.sequential = sequential
 
         self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
-        self.target_var = target_var
+        self.target_var = "river_flow"
 
-        if target_stations is None:
-            self.target_stations = [0, 1, 2, 3]
-        else:
-            self.target_stations = target_stations
+        self.target_stations = [0, 1, 2, 3]
 
         self.data_date_dict = OrderedDict()  # type: DataDateDictType
 
@@ -163,6 +163,7 @@ class GraphFlowDataset(Dataset):
 
             lagged_ndsi_ndvi_vars = df_NDSI_NDVI.columns[df_NDSI_NDVI.columns.str.match(".*(ndsi)|(ndvi).*")]
             df_ndsi_ndvi_lagged = generate_lags(df_NDSI_NDVI, lagged_ndsi_ndvi_vars, self.lag, "Subsubwatershed")
+            df_ndsi_ndvi_lagged = df_ndsi_ndvi_lagged.fillna(-1)
 
             # Store this for later reshaping
             n_subsubs = len(df_ndsi_ndvi_lagged.Subsubwatershed.unique())
@@ -209,7 +210,7 @@ class GraphFlowDataset(Dataset):
                 # Extract ndsi/ndvi values
                 if self.index_features or self.surface_features or self.cloud_features:
                     df_date_ndsi_ndvi = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
-                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d+")].to_numpy())
+                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*-\\d+")].to_numpy())
 
                     # Reshape to [self.lag, seq. len, n_features]
                     date_ndsi_ndvi_features = date_ndsi_ndvi_features.T.reshape(self.lag, n_subsubs, -1)
@@ -234,6 +235,10 @@ class GraphFlowDataset(Dataset):
             df_date_targets = df_date.loc[df_date["station_number"].isin(self.target_stations)]
 
             date_targets = torch.from_numpy(df_date_targets.loc[:, df_date_targets.columns.str.fullmatch("river_flow\\+\\d+")].to_numpy())
+
+            # We always want 6 predictions, so aggregate weekly into monthly
+            if self.freq == "W":
+                date_targets = date_targets.reshape((4, -1, 4)).mean(dim=2)
 
             if self.sequential:
                 # Mapping defines our graph
@@ -629,7 +634,7 @@ def aggregate_index_data(
 
 if __name__ == "__main__":
     root = join("data", "processed")
-    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", lag=6, sequential=True, index_features=True, surface_features=True, cloud_features=True)
+    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", sequential=True, index_features=True, surface_features=True, cloud_features=True)
 
     print(len(dataset))
 

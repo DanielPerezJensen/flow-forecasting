@@ -41,20 +41,29 @@ def train(cfg: DictConfig) -> None:
                 **cfg.data
             )
 
+    # the amount of variables we lag is dictated by the frequency
+    if cfg.data.freq == "M":
+        lag = 6
+    elif cfg.data.freq == "W":
+        lag = 24
+
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
-                                          lag=cfg.data.lag,
+                                          lag=lag,
                                           val_year_min=1999,
                                           val_year_max=2004,
                                           test_year_min=1974,
                                           test_year_max=1981)
 
-    train_loader = DataLoader(train, batch_size=cfg.training.batch_size,
-                              num_workers=8, shuffle=True)
-    val_loader = DataLoader(val, batch_size=cfg.training.batch_size,
-                            num_workers=8)
-    test_loader = DataLoader(test, batch_size=cfg.training.batch_size,
-                             num_workers=8)
+    train_loader = DataLoader(
+        train, batch_size=cfg.training.batch_size, num_workers=8, shuffle=True
+    )
+    val_loader = DataLoader(
+        val, batch_size=cfg.training.batch_size, num_workers=8
+    )
+    test_loader = DataLoader(
+        test, batch_size=cfg.training.batch_size, num_workers=8
+    )
 
     # Extract some information about the graph in our dataset
     data_sample = dataset[0]
@@ -70,7 +79,6 @@ def train(cfg: DictConfig) -> None:
     # Dummy pass to initialize all layers
     with torch.no_grad():
         batch = next(iter(train_loader))
-
         if cfg.data.sequential:
             model(batch.xs_dict, batch.edge_indices_dict)
         else:

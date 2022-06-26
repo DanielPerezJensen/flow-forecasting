@@ -46,8 +46,14 @@ class HeteroSeqLSTM(pl.LightningModule):
 
             self.convs.append(conv)
 
+        # The lag is dictated by the data frequency
+        if cfg.data.freq == "M":
+            self.lag = 6
+        elif cfg.data.freq == "W":
+            self.lag = 24
+
         self.gru = nn.GRU(cfg.model.out_channels, 64, batch_first=True)
-        self.linear = nn.Linear(64, self.cfg.data.n_preds)
+        self.linear = nn.Linear(64, 6)
 
         self.loss_fn = nn.MSELoss()
 
@@ -67,8 +73,11 @@ class HeteroSeqLSTM(pl.LightningModule):
 
         msr_out = conv_out["measurement"]
 
-        msr_out = msr_out.reshape((batch_size, self.cfg.data.lag, 4, -1))
+        # Reshape to [batch_size, lag, n_stations, dimension]
+        msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
+        # Reshape to [batch_size, n_stations, lag, dimension]
         msr_out = msr_out.permute((0, 2, 1, 3))
+        # Flatten into [batch_size * n_stations, lag, dimension]
         msr_out = msr_out.flatten(0, 1)
 
         gru_out, _ = self.gru(msr_out)
@@ -154,17 +163,6 @@ class HeteroSeqLSTM(pl.LightningModule):
         output = self(batch.xs_dict, batch.edge_indices_dict)
         target = batch.y_dict["measurement"]
 
-        n_target_stations = len(self.cfg.data.target_stations)
-
-        # Output will contain predicted outputs for all stations,
-        # but we only want the ones contained in the configuration
-        output = output.reshape(-1, 4)
-        output = output[:, self.cfg.data.target_stations]
-
-        # Targets only contain target stations,
-        # so only reshape to amount of target stations
-        target = target.reshape(-1, n_target_stations)
-
         loss = self.loss_fn(output, target)
 
         return loss, output, target
@@ -176,10 +174,8 @@ class HeteroSeqLSTM(pl.LightningModule):
         outputs_list, targets_list = [], []
 
         for out in step_outputs:
-            outputs_list.append(out["outputs"])
-            targets_list.append(out["targets"])
-
-        n_target_stations = len(self.cfg.data.target_stations)
+            outputs_list.append(out["outputs"].reshape(-1, 4))
+            targets_list.append(out["targets"].reshape(-1, 4))
 
         np_outputs = torch.cat(outputs_list).detach().cpu().numpy()
         np_targets = torch.cat(targets_list).detach().cpu().numpy()
