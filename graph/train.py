@@ -63,11 +63,18 @@ def train(cfg: DictConfig) -> None:
 
     # scaler = train.scaler
     scaler = dataset.scaler
-    model = models.HeteroGLSTM_pl(cfg, metadata, scaler)
+
+    if cfg.data.sequential:
+        model = models.HeteroSeqLSTM(cfg, metadata, scaler)
 
     # Dummy pass to initialize all layers
     with torch.no_grad():
-        model(data_sample.x_dict, data_sample.edge_index_dict)
+        batch = next(iter(train_loader))
+
+        if cfg.data.sequential:
+            model(batch.xs_dict, batch.edge_indices_dict)
+        else:
+            model(batch.x_dict, batch.edge_index_dict)
 
     # Add various callback if configuration calls for it
     callbacks = []  # type: List[Callback]

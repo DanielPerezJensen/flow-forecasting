@@ -1,8 +1,8 @@
 import torch
 import pytorch_lightning as pl
 from torch import nn
+from torch_geometric import nn as geom_nn
 from torch_geometric.data.batch import Batch
-from base_models import HeteroGLSTM
 from omegaconf import DictConfig, OmegaConf
 
 from sklearn.metrics import mean_squared_error, r2_score
@@ -21,39 +21,62 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
-class HeteroGLSTM_pl(pl.LightningModule):
+class HeteroSeqLSTM(pl.LightningModule):
     def __init__(
         self,
         cfg: DictConfig,
         metadata: Tuple[List[str], List[Tuple[str, str, str]]],
-        scaler: ScalerType
+        scaler: ScalerType,
     ) -> None:
 
         super().__init__()
 
-        self.model = HeteroGLSTM(cfg.model.num_layers, cfg.model.out_channels,
-                                 metadata)
-        self.linear = nn.Linear(cfg.model.out_channels, cfg.data.n_preds)
-
-        self.activation = nn.ReLU()
-        self.loss_fn = nn.MSELoss()
-
+        self.cfg = cfg
+        self.metadata = metadata
         self.scaler = scaler
 
-        # Store some hyperparameters
-        self.cfg = cfg
+        self.convs = nn.ModuleList()
+
+        for _ in range(cfg.model.num_layers):
+            conv = geom_nn.HeteroConv({
+                edge_type: geom_nn.SAGEConv(in_channels=(-1, -1),
+                                            out_channels=cfg.model.out_channels)
+                for edge_type in metadata[1]
+            })
+
+            self.convs.append(conv)
+
+        self.gru = nn.GRU(cfg.model.out_channels, 64, batch_first=True)
+        self.linear = nn.Linear(64, self.cfg.data.n_preds)
+
+        self.loss_fn = nn.MSELoss()
 
     def forward(
-        self, x_dict: TensorDict, edge_index_dict: TensorDict,
-        h_dict: Optional[TensorDict] = None,
-        c_dict: Optional[TensorDict] = None
-    ) -> Any:
+        self, x_dict: TensorDict, edge_index_dict: TensorDict
+    ) -> torch.Tensor:
+        batch_size = x_dict["measurement"].size(0)
 
-        h, c = self.model(x_dict, edge_index_dict,
-                          h_dict=h_dict, c_dict=c_dict)
-        out = self.linear(self.activation(h["measurement"]))
+        for node_type in x_dict:
+            x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
 
-        return out
+        for edge_type in edge_index_dict:
+            edge_index_dict[edge_type] = edge_index_dict[edge_type].permute((0, 2, 1)).flatten(0, 1).T
+
+        for conv in self.convs:
+            conv_out = conv(x_dict, edge_index_dict)
+
+        msr_out = conv_out["measurement"]
+
+        msr_out = msr_out.reshape((batch_size, self.cfg.data.lag, 4, -1))
+        msr_out = msr_out.permute((0, 2, 1, 3))
+        msr_out = msr_out.flatten(0, 1)
+
+        gru_out, _ = self.gru(msr_out)
+        gru_out = gru_out[:, -1, :]
+        gru_out = gru_out.reshape((batch_size, 4, -1))
+        lin_out = self.linear(gru_out)  # type: torch.Tensor
+
+        return lin_out
 
     def configure_optimizers(
         self
@@ -66,7 +89,6 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def training_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
-
         loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("train_loss", loss, on_epoch=True, on_step=True,
@@ -74,10 +96,10 @@ class HeteroGLSTM_pl(pl.LightningModule):
 
         return {"loss": loss, "outputs": output, "targets": target}
 
+
     def validation_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
-
         loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         self.log("val_loss", loss, on_epoch=True, on_step=True,
@@ -88,7 +110,6 @@ class HeteroGLSTM_pl(pl.LightningModule):
     def test_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
-
         loss, output, target = self._shared_eval_step(batch, batch_idx)
 
         return {"loss": loss, "outputs": output, "targets": target}
@@ -130,7 +151,7 @@ class HeteroGLSTM_pl(pl.LightningModule):
         self, batch: Batch, batch_idx: int
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
-        output = self(batch.x_dict, batch.edge_index_dict)
+        output = self(batch.xs_dict, batch.edge_indices_dict)
         target = batch.y_dict["measurement"]
 
         n_target_stations = len(self.cfg.data.target_stations)
@@ -205,7 +226,6 @@ def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
     """
     optimizer_dict = {
         "adam": torch.optim.Adam,
-        "adamw": torch.optim.AdamW
     }
 
     return optimizer_dict[optimizer_name]

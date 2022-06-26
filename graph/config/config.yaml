@@ -10,6 +10,7 @@ hydra:
     dir: .
 
 model:
+  name: SeqGRU
   out_channels: 32
   num_layers: 4
 

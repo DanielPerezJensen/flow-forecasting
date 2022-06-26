@@ -41,6 +41,7 @@ class HeteroSeqData(HeteroData):
         lag: Optional[int] = None, **kwargs: Any
     ):
         super().__init__(mapping, **kwargs)
+
         # If a mapping is provided increment indices for segmentation of subgraph
         if mapping:
             for key, value in mapping.items():
@@ -56,7 +57,7 @@ class HeteroSeqData(HeteroData):
                     # Increment indices
                     for i, edge_index in enumerate(edge_indices):
                         new_edge_indices[i][0] = edge_index[0] + (src_xs[0].size(0) * i)
-                        new_edge_indices[i][1] = edge_index[1] + (src_xs[0].size(0) * i)
+                        new_edge_indices[i][1] = edge_index[1] + (dst_xs[0].size(0) * i)
 
                     mapping[key]["edge_indices"] = new_edge_indices
 
@@ -71,7 +72,7 @@ class HeteroSeqData(HeteroData):
     ) -> Any:
         if key == "edge_indices" and store:
             src_type, _, dst_type = store._key
-            return torch.tensor([[self[src_type].xs[0].size(0)], [self[dst_type].xs[0].size(0)]]) * self.n_graphs
+            return torch.tensor([[self[src_type].xs[0].size(0)], [self[dst_type].xs[0].size(0)]]) * self.lag
         else:
             return super().__inc__(key, value, store, *args, **kwargs)
 
@@ -170,8 +171,9 @@ class GraphFlowDataset(Dataset):
         measurements_feats = load_nodes_csv(join(self.root, "static", "measurement.csv"), self.scaler_name)
         subsubwatersheds_feats = load_nodes_csv(join(self.root, "static", "subsub.csv"), self.scaler_name)
 
-        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "measurement-flows-measurement.csv"), self.scaler_name)
-        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-flows-subsub.csv"), self.scaler_name)
+        # Edge attributes always use standard scaler
+        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "measurement-flows-measurement.csv"), "standard")
+        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-flows-subsub.csv"), "standard")
         sub_in_msr, _ = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-in-measurement.csv"), self.scaler_name)
 
         if self.sequential:
@@ -207,7 +209,7 @@ class GraphFlowDataset(Dataset):
                 # Extract ndsi/ndvi values
                 if self.index_features or self.surface_features or self.cloud_features:
                     df_date_ndsi_ndvi = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
-                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d")].to_numpy())
+                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d+")].to_numpy())
 
                     # Reshape to [self.lag, seq. len, n_features]
                     date_ndsi_ndvi_features = date_ndsi_ndvi_features.T.reshape(self.lag, n_subsubs, -1)
@@ -222,7 +224,7 @@ class GraphFlowDataset(Dataset):
                 # Extract ndsi/ndvi values
                 if self.index_features or self.surface_features or self.cloud_features:
                     df_date_ndsi_ndvi = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
-                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d")].to_numpy())
+                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d+")].to_numpy())
 
                     subsub_features = torch.cat([date_ndsi_ndvi_features, subsubwatersheds_feats], dim=-1)
                 else:
@@ -230,6 +232,7 @@ class GraphFlowDataset(Dataset):
 
             # Extract date targets and convert to tensor
             df_date_targets = df_date.loc[df_date["station_number"].isin(self.target_stations)]
+
             date_targets = torch.from_numpy(df_date_targets.loc[:, df_date_targets.columns.str.fullmatch("river_flow\\+\\d+")].to_numpy())
 
             if self.sequential:
@@ -626,7 +629,7 @@ def aggregate_index_data(
 
 if __name__ == "__main__":
     root = join("data", "processed")
-    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", lag=6, index_features=True, surface_features=True, cloud_features=True)
+    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", lag=6, sequential=True, index_features=True, surface_features=True, cloud_features=True)
 
     print(len(dataset))
 
