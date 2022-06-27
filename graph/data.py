@@ -6,7 +6,7 @@ import os
 from os.path import join
 from datetime import timedelta
 from collections import OrderedDict
-
+from tqdm import tqdm
 
 import torch
 from torch_geometric.data import HeteroData, Dataset
@@ -17,10 +17,76 @@ from sklearn.preprocessing import MaxAbsScaler, RobustScaler
 from sklearn.preprocessing import FunctionTransformer
 
 from typing import Type, Optional, Tuple, List, Union, Dict, Any, Callable
+from torch_geometric.typing import EdgeType, NodeType, QueryType
+from torch_geometric.data.storage import BaseStorage, EdgeStorage, NodeStorage
+
 
 DataDateDictType = Dict[np.datetime64, HeteroData]
 ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
+NodeOrEdgeType = Union[NodeType, EdgeType]
+NodeOrEdgeStorage = Union[NodeStorage, EdgeStorage]
+
+MappingType = Dict[NodeOrEdgeType, Dict[str, torch.Tensor]]
+
+
+class HeteroSeqData(HeteroData):
+    """
+    This class defines a special version of HeteroData wherein a temporal dimension
+    is contained within the indices and the xs.
+    """
+    def __init__(
+        self,
+        mapping: Optional[MappingType] = None,
+        lag: Optional[int] = None, **kwargs: Any
+    ):
+        super().__init__(mapping, **kwargs)
+
+        # If a mapping is provided increment indices for segmentation of subgraph
+        if mapping:
+            for key, value in mapping.items():
+                # Only consider edges
+                if isinstance(key, tuple):
+                    src_type, _, dst_type = key
+                    edge_indices = value["edge_indices"]
+                    new_edge_indices = edge_indices.clone()
+
+                    src_xs = mapping[src_type]["xs"]
+                    dst_xs = mapping[dst_type]["xs"]
+
+                    # Increment indices
+                    for i, edge_index in enumerate(edge_indices):
+                        new_edge_indices[i][0] = edge_index[0] + (src_xs[0].size(0) * i)
+                        new_edge_indices[i][1] = edge_index[1] + (dst_xs[0].size(0) * i)
+
+                    mapping[key]["edge_indices"] = new_edge_indices
+
+            # Initialize HeteroData with properly incremented mapping
+            super().__init__(mapping, **kwargs)
+
+        self.lag = lag
+
+    def __inc__(
+        self, key: str, value: Any, store: Optional[NodeOrEdgeStorage],
+        *args: Any, **kwargs: Any
+    ) -> Any:
+        if key == "edge_indices" and store:
+            src_type, _, dst_type = store._key
+            return torch.tensor([[self[src_type].xs[0].size(0)], [self[dst_type].xs[0].size(0)]]) * self.lag
+        else:
+            return super().__inc__(key, value, store, *args, **kwargs)
+
+    def __cat_dim__(
+        self, key: str, value: Any,
+        store: Optional[NodeOrEdgeStorage] = None,
+        *args: Any, **kwargs: Any
+    ) -> Any:
+        if key == "xs":
+            return None
+        if key == "y":
+            return None
+        else:
+            return super().__cat_dim__(key, value, store, *args, **kwargs)
 
 
 class GraphFlowDataset(Dataset):
@@ -30,10 +96,8 @@ class GraphFlowDataset(Dataset):
         graph_type: Optional[str] = None,
         scaler_name: str = "none",
         freq: str = "M",
-        lag: int = 6,
+        sequential: bool = False,
         lagged_vars: Optional[List[str]] = None,
-        target_var: str = "river_flow",
-        target_stations: Optional[List[int]] = None,
         index_features: bool = False,
         surface_features: bool = False,
         cloud_features: bool = False,
@@ -44,16 +108,22 @@ class GraphFlowDataset(Dataset):
 
         self.freq = freq
         self.scaler_name = scaler_name
-        self.lag = lag
+
+        # Set lag and amount of prediction according to frequency
+        if self.freq == "M":
+            self.lag = 6
+        elif self.freq == "W":
+            self.lag = 24
+
+        self.n_preds = self.lag
+
+        self.sequential = sequential
 
         self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
-        self.target_var = target_var
+        self.target_var = "river_flow"
 
-        if target_stations is None:
-            self.target_stations = [0, 1, 2, 3]
-        else:
-            self.target_stations = target_stations
+        self.target_stations = [0, 1, 2, 3]
 
         self.data_date_dict = OrderedDict()  # type: DataDateDictType
 
@@ -71,12 +141,18 @@ class GraphFlowDataset(Dataset):
 
         Processes the data found in root
         """
-        if not self.root:
-            raise ValueError
-
         # Gather and lag flow data
         df_features = load_and_aggregate_flow_data(root, self.freq)
-        df_lagged = generate_lags(df_features, self.lagged_vars, self.lag, groupby_col="station_number")
+        df_lagged = generate_lags(df_features, self.lagged_vars, self.lag, "station_number")
+        df_lagged = generate_lags(df_lagged, [self.target_var], -self.n_preds, "station_number")
+
+        # Drop any row for which one of the target stations has no measurement
+        df_target_stations = df_lagged[df_lagged.station_number.isin(self.target_stations)]
+        dropped_dates = df_target_stations[df_target_stations[self.target_var].isna()]["date"]
+        df_lagged = df_lagged.drop(df_lagged.index[df_lagged.date.isin(dropped_dates)])
+
+        # Impute nan values
+        df_lagged = df_lagged.fillna(-1)
 
         # Gather and lag NDSI NDVI values if called for
         if self.index_features or self.surface_features or self.cloud_features:
@@ -86,18 +162,26 @@ class GraphFlowDataset(Dataset):
                             )
 
             lagged_ndsi_ndvi_vars = df_NDSI_NDVI.columns[df_NDSI_NDVI.columns.str.match(".*(ndsi)|(ndvi).*")]
-            df_ndsi_ndvi_lagged = generate_lags(df_NDSI_NDVI, lagged_ndsi_ndvi_vars, self.lag, groupby_col="Subsubwatershed")
+            df_ndsi_ndvi_lagged = generate_lags(df_NDSI_NDVI, lagged_ndsi_ndvi_vars, self.lag, "Subsubwatershed")
+            df_ndsi_ndvi_lagged = df_ndsi_ndvi_lagged.fillna(-1)
 
+            # Store this for later reshaping
             n_subsubs = len(df_ndsi_ndvi_lagged.Subsubwatershed.unique())
-            n_lagged_variables = df_ndsi_ndvi_lagged.loc[:, df_ndsi_ndvi_lagged.columns.str.match(".*_\\d")].shape[1]
 
         # Extract nodes and eddges from disk
         measurements_feats = load_nodes_csv(join(self.root, "static", "measurement.csv"), self.scaler_name)
         subsubwatersheds_feats = load_nodes_csv(join(self.root, "static", "subsub.csv"), self.scaler_name)
 
-        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "measurement-flows-measurement.csv"), self.scaler_name)
-        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-flows-subsub.csv"), self.scaler_name)
+        # Edge attributes always use standard scaler
+        msr_flows_msr, msr_flows_msr_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "measurement-flows-measurement.csv"), "standard")
+        sub_flows_sub, sub_flows_sub_attr = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-flows-subsub.csv"), "standard")
         sub_in_msr, _ = load_edges_csv(join(self.root, "graph", self.graph_type, "subsub-in-measurement.csv"), self.scaler_name)
+
+        if self.sequential:
+            # Edge indices are repeated across the temporal dimension
+            msr_flows_msr = msr_flows_msr.repeat(self.lag, 1, 1)
+            sub_flows_sub = sub_flows_sub.repeat(self.lag, 1, 1)
+            sub_in_msr = sub_in_msr.repeat(self.lag, 1, 1)
 
         self.scaler = get_scaler(self.scaler_name)
 
@@ -107,54 +191,78 @@ class GraphFlowDataset(Dataset):
 
         # Scale target column separately as we need to inverse transform later
         df_lagged[[self.target_var]] = self.scaler.fit_transform(df_lagged[[self.target_var]])
-
-        df_lagged = df_lagged.drop(df_lagged.index[df_lagged[self.target_var] == -1])
         unique_dates = df_lagged.date.unique()
 
-        for date in unique_dates:
-
+        for date in tqdm(unique_dates, desc="date"):
             date = np.datetime64(date, "D")
             df_date = df_lagged.loc[df_lagged.date == date].sort_values("station_number")
+
             # Extract date features and add the static features
-            date_features = torch.from_numpy(df_date.loc[:, df_date.columns.str.match(f"(({')|('.join(self.lagged_vars)}))_\\d")].to_numpy())
-            date_features = torch.cat([measurements_feats, date_features], dim=-1)
+            date_flow_features = torch.from_numpy(df_date.loc[:, df_date.columns.str.match(f"river_flow-\\d+")].to_numpy())
 
-            # Extract ndsi/ndvi values
-            if self.index_features or self.surface_features or self.cloud_features:
-                df_ndsi_ndvi_date = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
+            if self.sequential:
+                # Reshape to [self.lag, seq. len, 1]
+                date_flow_features = date_flow_features.T.reshape(self.lag, 4, 1)
 
-                # In case we have no NDSI NDVI data we add imputed values
-                if len(df_ndsi_ndvi_date) == 0:
-                    date_ndsi_ndvi_features = -torch.ones((n_subsubs, n_lagged_variables))
+                # Repeat so we can concatenate across D dimension
+                msr_features = torch.cat([date_flow_features, measurements_feats[None, :, :].repeat(self.lag, 1, 1)], dim=2)
+
+                # Extract ndsi/ndvi values
+                if self.index_features or self.surface_features or self.cloud_features:
+                    df_date_ndsi_ndvi = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
+                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*-\\d+")].to_numpy())
+
+                    # Reshape to [self.lag, seq. len, n_features]
+                    date_ndsi_ndvi_features = date_ndsi_ndvi_features.T.reshape(self.lag, n_subsubs, -1)
+                    subsub_features = torch.cat([date_ndsi_ndvi_features, subsubwatersheds_feats[None, :, :].repeat(self.lag, 1, 1)], dim=2)
+
                 else:
-                    date_ndsi_ndvi_features = torch.from_numpy(df_ndsi_ndvi_date.loc[:, df_ndsi_ndvi_date.columns.str.match(".*_\\d")].to_numpy())
-
-                subsub_features = torch.cat([subsubwatersheds_feats, date_ndsi_ndvi_features], dim=-1)
+                    subsub_features = subsubwatersheds_feats[None, :, :].repeat(self.lag, 1, 1)
 
             else:
-                subsub_features = subsubwatersheds_feats
+                msr_features = torch.cat([date_flow_features, measurements_feats], dim=-1)
+
+                # Extract ndsi/ndvi values
+                if self.index_features or self.surface_features or self.cloud_features:
+                    df_date_ndsi_ndvi = df_ndsi_ndvi_lagged.loc[df_ndsi_ndvi_lagged.date == date]
+                    date_ndsi_ndvi_features = torch.from_numpy(df_date_ndsi_ndvi.loc[:, df_date_ndsi_ndvi.columns.str.match(".*_\\d+")].to_numpy())
+
+                    subsub_features = torch.cat([date_ndsi_ndvi_features, subsubwatersheds_feats], dim=-1)
+                else:
+                    subsub_features = subsubwatersheds_feats
 
             # Extract date targets and convert to tensor
             df_date_targets = df_date.loc[df_date["station_number"].isin(self.target_stations)]
-            date_targets = torch.from_numpy(df_date_targets[self.target_var].to_numpy())
 
-            data = HeteroData()
+            date_targets = torch.from_numpy(df_date_targets.loc[:, df_date_targets.columns.str.fullmatch("river_flow\\+\\d+")].to_numpy())
 
-            data["measurement"].x = date_features.float()
-            data["measurement"].y = date_targets.float()
-            data["subsub"].x = subsub_features.float()
+            # We always want 6 predictions, so aggregate weekly into monthly
+            if self.freq == "W":
+                date_targets = date_targets.reshape((4, -1, 4)).mean(dim=2)
 
-            data["measurement", "flows", "measurement"].edge_index = msr_flows_msr
-            data["measurement", "flows", "measurement"].edge_attr = msr_flows_msr_attr.float()
+            if self.sequential:
+                # Mapping defines our graph
+                mapping = {
+                    ("measurement", "flows", "measurement"): {"edge_indices": msr_flows_msr},
+                    ("subsub", "flows", "subsub"): {"edge_indices": sub_flows_sub},
+                    ("subsub", "in", "measurement"): {"edge_indices": sub_in_msr},
+                    "measurement": {"xs": msr_features.float(), "y": date_targets.float()},
+                    "subsub": {"xs": subsub_features.float()}
+                }
 
-            data["subsub", "flows", "subsub"].edge_index = sub_flows_sub
-            data["subsub", "flows", "subsub"].edge_attr = sub_flows_sub_attr.float()
+                data = HeteroSeqData(mapping, self.lag)
+            else:
+                mapping = {
+                    ("measurement", "flows", "measurement"): {"edge_index": msr_flows_msr},
+                    ("subsub", "flows", "subsub"): {"edge_index": sub_flows_sub},
+                    ("subsub", "in", "measurement"): {"edge_index": sub_in_msr},
+                    "measurement": {"x": msr_features.float(), "y": date_targets.float()},
+                    "subsub": {"x": subsub_features.float()}
+                }
 
-            data["subsub", "in", "measurement"].edge_index = sub_in_msr
+                data = HeteroData(mapping)
 
             self.data_date_dict[date] = data
-
-        self.data_list = list(self.data_date_dict.values())
 
     def set_data(self, date: np.datetime64, value: HeteroData) -> None:
         """
@@ -163,7 +271,6 @@ class GraphFlowDataset(Dataset):
         Sets a certain value (or graph) on a certain date in the dataset
         """
         self.data_date_dict[date] = value
-        self.data_list = list(self.data_date_dict.values())
 
     def get_item_by_date(self, date: np.datetime64) -> HeteroData:
         """
@@ -172,6 +279,11 @@ class GraphFlowDataset(Dataset):
         Returns graph based on the date provided
         """
         return self.data_date_dict[date]
+
+    @property
+    def data_list(self) -> List[Any]:
+        assert self.data_date_dict
+        return list(self.data_date_dict.values())
 
     def __repr__(self) -> str:
         return repr(self.data_list)
@@ -216,19 +328,15 @@ def split_dataset(
     test_end = np.datetime64(str(test_year_max), "D")
 
     for date in dataset.data_date_dict:
-        if val_start <= date < val_end:
+        if val_start <= date < val_end - offset:
             val_dataset.set_data(date, dataset.get_item_by_date(date))
-        elif test_start <= date < test_end:
+        elif test_start <= date < test_end - offset:
             test_dataset.set_data(date, dataset.get_item_by_date(date))
         # These dates are not allowed in the training set as
         # they are found as features in the validation or test set
-        elif val_start - offset <= date < val_start:
+        elif val_start - offset <= date < val_end:
             continue
-        elif val_end <= date < val_end + offset:
-            continue
-        elif test_start - offset <= date < test_start:
-            continue
-        elif test_end <= date < test_end + offset:
+        elif test_start - offset <= date < test_end:
             continue
         else:
             train_dataset.set_data(date, dataset.get_item_by_date(date))
@@ -237,18 +345,23 @@ def split_dataset(
 
 
 def generate_lags(
-    df: pd.DataFrame, values: List[str],
-    n_lags: int, groupby_col: str = "station_number"
+    df: pd.DataFrame, values: List[str], n_lags: int, groupby_col: str
 ) -> pd.DataFrame:
     """
     function: generate_lags
-
     Generates a dataframe with columns denoting lagged value up to n_lags,
     does this per station number so there is no overlap between stations.
     """
     frames = []
 
-    # Iterate over dataframes split by groupby_col
+    # We use - if the lags are negative and + if the lags are positive
+    sig = n_lags / abs(n_lags)
+    if sig == 1:
+        sign = "-"
+    elif sig == -1:
+        sign = "+"
+
+    # Iterate over dataframes split by station number
     for _, group in df.groupby(groupby_col):
 
         # Lag each dataframe individually
@@ -258,10 +371,16 @@ def generate_lags(
         add_columns = []
 
         for value in values:
-            for n in range(1, n_lags + 1):
-                add_columns.append(
-                    pd.Series(df_n[f"{value}"].shift(n), name=f"{value}_{n}")
-                )
+            if sign == "-":
+                for n in range(1, n_lags + 1):
+                    add_columns.append(
+                        pd.Series(df_n[f"{value}"].shift(n), name=f"{value}{sign}{n}")
+                    )
+            elif sign == "+":
+                for n in range(0, -(n_lags)):
+                    add_columns.append(
+                        pd.Series(df_n[f"{value}"].shift(-n), name=f"{value}{sign}{n}")
+                    )
 
         add_df = pd.concat(add_columns, axis=1)
         df_n = pd.concat((df_n, add_df), axis=1)
@@ -269,10 +388,9 @@ def generate_lags(
         frames.append(df_n)
 
     # Impute missing values
-    df_merged_flow_agg = pd.concat(frames)
-    df_merged_flow_agg = df_merged_flow_agg.fillna(-1)
+    df_merged = pd.concat(frames)
 
-    return df_merged_flow_agg
+    return df_merged
 
 
 def get_scaler(scaler: str) -> ScalerType:
@@ -382,9 +500,6 @@ def load_and_aggregate_flow_data(
 
     df_flow_aggregated = pd.concat(station_dfs)
 
-    # Fill in missing values with -1 for imputation
-    df_flow_aggregated = df_flow_aggregated.fillna(-1)
-
     return df_flow_aggregated
 
 
@@ -409,23 +524,43 @@ def gather_ndsi_ndvi_data(
             )
 
     date_range = pd.date_range("1965", "2022", freq=freq)
-    df_ndsi_ndvi = pd.DataFrame({"date": date_range}).sort_values("date")
+    subsubwatersheds = df_NDSI.Subsubwatershed.unique()
+    subsub_dfs = []
 
-    if index_features:
-        df_index_ndsi_ndvi = aggregate_index_data(freq, df_NDSI, df_NDVI)
-        df_ndsi_ndvi = pd.merge(df_ndsi_ndvi, df_index_ndsi_ndvi, how="left")
+    for subsubwatershed in subsubwatersheds:
 
-    if surface_features:
-        df_surfavg_ndsi_ndvi = aggregate_area_data(freq, df_NDSI,
-                                                   df_NDVI, "Surfavg")
-        df_ndsi_ndvi = pd.merge(df_ndsi_ndvi, df_surfavg_ndsi_ndvi, how="left")
+        df_NDSI_subsub = df_NDSI.loc[df_NDSI.Subsubwatershed == subsubwatershed]
+        df_NDVI_subsub = df_NDVI.loc[df_NDVI.Subsubwatershed == subsubwatershed]
 
-    if cloud_features:
-        df_cloud_ndsi_ndvi = aggregate_area_data(freq, df_NDSI,
-                                                 df_NDVI, "Surfcloudavg")
-        df_ndsi_ndvi = pd.merge(df_ndsi_ndvi, df_cloud_ndsi_ndvi, how="left")
+        df_subsubwatershed = pd.DataFrame({"date": date_range})
 
-    df_ndsi_ndvi = df_ndsi_ndvi.dropna()
+        if index_features:
+            df_index_ndsi_ndvi = aggregate_index_data(freq,
+                                                      df_NDSI_subsub,
+                                                      df_NDVI_subsub)
+
+            df_subsubwatershed = pd.merge(df_subsubwatershed,
+                                          df_index_ndsi_ndvi, how="left")
+
+        if surface_features:
+            df_surfavg_ndsi_ndvi = aggregate_area_data(freq,
+                                                       df_NDSI_subsub,
+                                                       df_NDVI_subsub, "Surfavg")
+            df_subsubwatershed = pd.merge(df_subsubwatershed,
+                                          df_surfavg_ndsi_ndvi, how="left")
+
+        if cloud_features:
+            df_cloud_ndsi_ndvi = aggregate_area_data(freq,
+                                                     df_NDSI_subsub,
+                                                     df_NDVI_subsub, "Surfcloudavg")
+            df_subsubwatershed = pd.merge(df_subsubwatershed,
+                                          df_cloud_ndsi_ndvi, how="left")
+
+        df_subsubwatershed["Subsubwatershed"] = subsubwatershed
+        subsub_dfs.append(df_subsubwatershed)
+
+    df_ndsi_ndvi = pd.concat(subsub_dfs)
+    df_ndsi_ndvi = df_ndsi_ndvi.fillna(-1)
 
     return df_ndsi_ndvi
 
@@ -442,21 +577,17 @@ def aggregate_area_data(
 
     # Take sum of each day and average over the months to aggregate area data
     daily_ndsi_surf_sum = df_NDSI.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq="D")]
+                             pd.Grouper(key='date', freq="D")
                         )[[column]].sum().reset_index()
     daily_ndvi_surf_sum = df_NDVI.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq="D")]
+                             pd.Grouper(key='date', freq="D")
                         )[[column]].sum().reset_index()
 
     freq_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq=freq)]
+                             pd.Grouper(key='date', freq=freq)
                             )[[column]].mean()
     freq_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq=freq)]
+                             pd.Grouper(key='date', freq=freq)
                             )[[column]].mean()
 
     surf_ndsi_mean_df = freq_ndsi_surf_mean.reset_index()
@@ -482,12 +613,10 @@ def aggregate_index_data(
 
     # Take average of NDSI values for each month and aggregate
     monthly_ndsi_mean = df_NDSI.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq=freq)]
+                             pd.Grouper(key='date', freq=freq)
                         )[["avg"]].mean()
     monthly_ndvi_mean = df_NDVI.groupby(
-                            ["Subsubwatershed",
-                             pd.Grouper(key='date', freq=freq)]
+                             pd.Grouper(key='date', freq=freq)
                         )[["avg"]].mean()
 
     # Rename columns to enable merging
@@ -505,7 +634,9 @@ def aggregate_index_data(
 
 if __name__ == "__main__":
     root = join("data", "processed")
-    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", lag=26, index_features=True)
+    dataset = GraphFlowDataset(root, process=True, scaler_name="none", freq="W", sequential=True, index_features=True, surface_features=True, cloud_features=True)
+
+    print(len(dataset))
 
     x = next(iter(dataset))
 

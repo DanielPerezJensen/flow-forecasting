@@ -10,9 +10,9 @@ hydra:
     dir: .
 
 model:
+  name: SeqGRU
   out_channels: 32
-  n_outputs: 1
-  num_layers: 4
+  num_layers: 1
 
 run:
   log:
@@ -36,10 +36,8 @@ data:
   scaler_name: none
   graph_type: base
   freq: W
-  lag: 24
+  sequential: True
   lagged_vars: [river_flow]
-  target_var: river_flow
-  target_stations: [0, 1, 2, 3]
   index_features: False
   surface_features: False
   cloud_features: False
