@@ -39,7 +39,7 @@ def preprocess_static_data() -> None:
     static_subsub_nodes_df, static_subsub_edges_df = subsub_static_data
 
     measurement_static_data = preprocess_measurement_static_data()
-    static_measurement_nodes_df, static_msrmsr_edges_df = measurement_static_data
+    static_msr_nodes_df, static_msrmsr_edges_df = measurement_static_data
 
     # Here we define edges between subsub nodes and measurement station nodes
     # Handled separately to enable different features to be added down the line
@@ -58,10 +58,10 @@ def preprocess_static_data() -> None:
     s_mapper = {node: i for i, node in
                 enumerate(static_subsub_nodes_df.index.to_list())}
     m_mapper = {node: i for i, node in
-                enumerate(static_measurement_nodes_df.index.to_list())}
+                enumerate(static_msr_nodes_df.index.to_list())}
 
     static_subsub_nodes_df.index = static_subsub_nodes_df.index.map(s_mapper)
-    static_measurement_nodes_df.index = static_measurement_nodes_df.index.map(m_mapper)
+    static_msr_nodes_df.index = static_msr_nodes_df.index.map(m_mapper)
 
     static_subsub_edges_df.src = static_subsub_edges_df.src.map(s_mapper)
     static_subsub_edges_df.dst = static_subsub_edges_df.dst.map(s_mapper)
@@ -82,8 +82,8 @@ def preprocess_static_data() -> None:
 
     static_subsub_nodes_df.to_csv(join(processed_path, "static",
                                        "subsub.csv"))
-    static_measurement_nodes_df.to_csv(join(processed_path, "static",
-                                            "measurement.csv"))
+    static_msr_nodes_df.to_csv(join(processed_path, "static",
+                                    "measurement.csv"))
 
     static_subsub_edges_df.to_csv(join(processed_path, "graph", "base",
                                        "subsub-flows-subsub.csv"))
@@ -109,7 +109,7 @@ def preprocess_subsub_static_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     unprocessed_path = join("data", "unprocessed")
     static_subsub_path = join(unprocessed_path, "Data_Static",
-                                      "DataCriosphere-Watershedf.txt")
+                              "DataCriosphere-Watershedf.txt")
 
     static_subsub_nodes_df = pd.read_csv(
             static_subsub_path,

@@ -364,20 +364,38 @@ class GraphFlowDataset(Dataset):
             if self.sequential:
                 # Mapping defines our graph
                 mapping = {
-                    ("measurement", "flows", "measurement"): {"edge_indices": msr_flows_msr},
-                    ("subsub", "flows", "subsub"): {"edge_indices": sub_flows_sub},
-                    ("subsub", "in", "measurement"): {"edge_indices": sub_in_msr},
-                    "measurement": {"xs": msr_features.float(), "y": date_targets.float()},
+                    ("measurement", "flows", "measurement"): {
+                        "edge_indices": msr_flows_msr
+                    },
+                    ("subsub", "flows", "subsub"): {
+                        "edge_indices": sub_flows_sub
+                    },
+                    ("subsub", "in", "measurement"): {
+                        "edge_indices": sub_in_msr
+                    },
+                    "measurement": {
+                        "xs": msr_features.float(),
+                        "y": date_targets.float()
+                    },
                     "subsub": {"xs": subsub_features.float()}
                 }
 
                 data = HeteroSeqData(mapping, self.lag)
             else:
                 mapping = {
-                    ("measurement", "flows", "measurement"): {"edge_index": msr_flows_msr},
-                    ("subsub", "flows", "subsub"): {"edge_index": sub_flows_sub},
-                    ("subsub", "in", "measurement"): {"edge_index": sub_in_msr},
-                    "measurement": {"x": msr_features.float(), "y": date_targets.float()},
+                    ("measurement", "flows", "measurement"): {
+                        "edge_index": msr_flows_msr
+                    },
+                    ("subsub", "flows", "subsub"): {
+                        "edge_index": sub_flows_sub
+                    },
+                    ("subsub", "in", "measurement"): {
+                        "edge_index": sub_in_msr
+                    },
+                    "measurement": {
+                        "x": msr_features.float(),
+                        "y": date_targets.float()
+                    },
                     "subsub": {"x": subsub_features.float()}
                 }
 

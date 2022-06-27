@@ -39,8 +39,9 @@ class HeteroSeqLSTM(pl.LightningModule):
 
         for _ in range(cfg.model.num_layers):
             conv = geom_nn.HeteroConv({
-                edge_type: geom_nn.SAGEConv(in_channels=(-1, -1),
-                                            out_channels=cfg.model.out_channels)
+                edge_type: geom_nn.SAGEConv(
+                    in_channels=(-1, -1), out_channels=cfg.model.out_channels
+                )
                 for edge_type in metadata[1]
             })
 
@@ -66,7 +67,9 @@ class HeteroSeqLSTM(pl.LightningModule):
             x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
 
         for edge_type in edge_index_dict:
-            edge_index_dict[edge_type] = edge_index_dict[edge_type].permute((0, 2, 1)).flatten(0, 1).T
+            edge_index_dict[edge_type] = edge_index_dict[
+                edge_type
+            ].permute((0, 2, 1)).flatten(0, 1).T
 
         for conv in self.convs:
             conv_out = conv(x_dict, edge_index_dict)
@@ -91,7 +94,8 @@ class HeteroSeqLSTM(pl.LightningModule):
         self
     ) -> Tuple[torch.optim.Optimizer, torch.optim.Optimizer]:
         optimizer = get_optimizer(self.cfg.optimizer.name)
-        self.optimizer = optimizer(self.parameters(), **self.cfg.optimizer.hparams)
+        self.optimizer = optimizer(self.parameters(),
+                                   **self.cfg.optimizer.hparams)
 
         return self.optimizer
 
@@ -104,7 +108,6 @@ class HeteroSeqLSTM(pl.LightningModule):
                  batch_size=self.cfg.training.batch_size)
 
         return {"loss": loss, "outputs": output, "targets": target}
-
 
     def validation_step(
         self, batch: Batch, batch_idx: int
@@ -132,7 +135,7 @@ class HeteroSeqLSTM(pl.LightningModule):
         for k in eval_dict.copy():
             eval_dict[f"train_{k}"] = eval_dict.pop(k)
 
-        self.log_dict(eval_dict, on_epoch=True)
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def validation_epoch_end(
         self, validation_step_outputs
