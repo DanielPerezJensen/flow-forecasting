@@ -236,7 +236,7 @@ def preprocess_temporal_data() -> None:
     df.station_number = df.station_number.map(nodes_mapper)
 
     # Save dataframe to disk
-    df.to_csv(join(processed_path, "temporal", "raw-measurements.csv"))
+    df.to_csv(join(processed_path, "temporal", "measurements.csv"))
 
     # Take care of the NDSI NDVI data
     data_folder = "Data_NDSI_NDVI"
@@ -270,7 +270,7 @@ def preprocess_temporal_data() -> None:
         # Map subsubwatersheds to the correct index
         df.Subsubwatershed = df.Subsubwatershed.map(subsub_mapper)
 
-        df.to_csv(join(processed_path, "temporal", f"raw-{data_file[:4]}.csv"))
+        df.to_csv(join(processed_path, "temporal", f"{data_file[:4]}.csv"))
 
 
 if __name__ == "__main__":
