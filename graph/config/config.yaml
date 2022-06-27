@@ -38,6 +38,11 @@ data:
   freq: W
   sequential: True
   lagged_vars: [river_flow]
-  index_features: False
-  surface_features: False
-  cloud_features: False
+  ndsi:
+    index: False
+    surface: False
+    cloud: False
+  ndvi:
+    index: False
+    surface: False
+    cloud: False

@@ -41,15 +41,8 @@ def train(cfg: DictConfig) -> None:
                 **cfg.data
             )
 
-    # the amount of variables we lag is dictated by the frequency
-    if cfg.data.freq == "M":
-        lag = 6
-    elif cfg.data.freq == "W":
-        lag = 24
-
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
-                                          lag=lag,
                                           val_year_min=1999,
                                           val_year_max=2004,
                                           test_year_min=1974,
