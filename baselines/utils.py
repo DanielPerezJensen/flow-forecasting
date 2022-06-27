@@ -18,18 +18,6 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
-def inverse_transform(
-    scaler: ScalerType, df: pd.DataFrame, columns: List[str]
-) -> pd.DataFrame:
-    """
-    Transforms values in df columns back to normal values using sklearn scaler
-    """
-    for col in columns:
-        df[col] = scaler.inverse_transform(df[col].to_numpy().reshape(-1, 1))
-
-    return df
-
-
 def predict(
     model: pl.LightningModule, test_loader: DataLoader
 ) -> Tuple[npt.NDArray[float], npt.NDArray[float], npt.NDArray[float]]:
@@ -41,6 +29,8 @@ def predict(
         test_loader: pytorch.DataLoader
     """
     model.eval()
+
+    scaler = model.scaler
 
     inputs = []
     predictions = []
@@ -57,17 +47,25 @@ def predict(
 
         outputs = model(inp)
 
-        inputs.append(inp.detach().cpu().squeeze().numpy()[:, 0])
-        predictions.append(outputs.detach().cpu().numpy().reshape((model.cfg.data.n_preds)))
-        values.append(targets.detach().cpu().numpy().reshape((model.cfg.data.n_preds)))
+        inputs.append(
+            inp.detach().cpu().squeeze().numpy()[:, 0]
+        )
+        predictions.append(
+            outputs.detach().cpu().numpy().reshape((targets.size(2)))
+        )
+        values.append(
+            targets.detach().cpu().numpy().reshape((targets.size(2)))
+        )
 
-    return np.array(inputs), np.array(predictions), np.array(values)
+    predictions = scaler.inverse_transform(np.array(predictions))
+    values = scaler.inverse_transform(np.array(values))
+
+    return np.array(inputs), predictions, values
 
 
 def format_predictions(
     inputs: npt.NDArray[float], predictions: npt.NDArray[float],
-    values: npt.NDArray[float], index: List[np.datetime64],
-    scaler: ScalerType = None
+    values: npt.NDArray[float], index: List[np.datetime64]
 ) -> pd.DataFrame:
     """
     Format predictions and values into dataframe for easy plotting
@@ -85,7 +83,9 @@ def format_predictions(
     inputs = inputs.T
     df_result = df_result.assign(**dict(zip(input_cols, inputs)))
 
-    prediction_cols = [f"prediction_{i + 1}" for i in range(len(predictions[0]))]
+    prediction_cols = [
+        f"prediction_{i + 1}" for i in range(len(predictions[0]))
+    ]
     predictions = predictions.T
     df_result = df_result.assign(**dict(zip(prediction_cols, predictions)))
 
@@ -94,8 +94,5 @@ def format_predictions(
     df_result = df_result.assign(**dict(zip(value_cols, values)))
 
     columns = input_cols + prediction_cols + value_cols
-
-    if scaler is not None:
-        df_result = inverse_transform(scaler, df_result, columns)
 
     return df_result

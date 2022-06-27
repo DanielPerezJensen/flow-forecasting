@@ -115,7 +115,7 @@ def train(cfg: DictConfig) -> None:
         inputs, targets, predictions = utils.predict(model, test_loader)
         index = list(test.data_date_dict.keys())
         df_results = utils.format_predictions(inputs, targets,
-                                              predictions, index, scaler)
+                                              predictions, index)
 
         if cfg.run.plotting:
             plotting.plot_ind_predictions(df_results)
@@ -159,12 +159,12 @@ def evaluate_summer_preds(
         if dataset.freq == "M":
             for date, value in dataset.data_date_dict.items():
                 # Third month is split between winter and summer
-                if int(date.astype(str).split("-")[1]) == 3:
+                if int(date.astype(str).split("-")[1]) == 8:
                     summer_dataset.set_data(date, value)
 
         elif dataset.freq == "W":
             for date, value in dataset.data_date_dict.items():
-                if int(date.astype(str).split("-")[1]) == 3:
+                if int(date.astype(str).split("-")[1]) == 8:
                     summer_dataset.set_data(date, value)
 
     loader = DataLoader(summer_dataset, batch_size=1, num_workers=8)

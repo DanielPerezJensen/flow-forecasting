@@ -33,8 +33,6 @@ training:
 data:
   scaler_name: none
   freq: M
-  lag: 6
-  n_preds: 6
   lagged_vars: [river_flow]
   lagged_stations: [34]
   target_var: river_flow

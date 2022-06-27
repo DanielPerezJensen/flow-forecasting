@@ -56,7 +56,9 @@ class AverageMonthPredictor:
             date_string = date.astype(str)  # type: str
             date_string_split = date_string.split('-')
             month = int(date_string_split[1])
-            self.month_data[month].append(self.dataset.get_item_by_date(date)[1].item())
+            self.month_data[month].append(
+                self.dataset.get_item_by_date(date)[1].item()
+            )
 
         self.month_fit = {}  # type: Dict[int, float]
 

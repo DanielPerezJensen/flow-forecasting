@@ -16,9 +16,17 @@ def plot_ind_predictions(df_result: pd.DataFrame) -> None:
     """
     df_result.index = pd.to_datetime(df_result.index)
 
-    lagged_cols = df_result.columns[df_result.columns.str.match("river_flow-\\d")]
-    target_cols = df_result.columns[df_result.columns.str.match("river_flow\\+\\d")]
-    prediction_cols = df_result.columns[df_result.columns.str.match("prediction_\\d")]
+    lagged_cols = df_result.columns[
+        df_result.columns.str.match("river_flow-\\d")
+    ]
+
+    target_cols = df_result.columns[
+        df_result.columns.str.match("river_flow\\+\\d")
+    ]
+
+    prediction_cols = df_result.columns[
+        df_result.columns.str.match("prediction_\\d")
+    ]
 
     n = 16
 
