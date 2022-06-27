@@ -336,7 +336,7 @@ class LSTM(pl.LightningModule):
         )
 
         # Typing option of fully connected output layer
-        self.fc: type: Callable[[torch.Tensor], torch.Tensor]
+        self.fc: Callable[[torch.Tensor], torch.Tensor]
         self.fc = nn.Linear(cfg.model.hidden_dim, output_dim)
 
         self.scaler = scaler
