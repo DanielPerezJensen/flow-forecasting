@@ -6,6 +6,7 @@ import pandas as pd
 import os
 from datetime import timedelta
 from collections import OrderedDict
+import re
 
 import torch
 from torch.utils.data import Dataset
@@ -36,10 +37,9 @@ class RiverFlowDataset(Dataset[Any]):
         lagged_stations: Optional[List[int]] = None,
         target_var: str = "river_flow",
         target_stations: Optional[List[int]] = None,
-        index_features: bool = False,
-        surface_features: bool = False,
-        cloud_features: bool = False,
         time_features: bool = False,
+        ndsi: Optional[DictConfig] = None,
+        ndvi: Optional[DictConfig] = None,
         process: bool = False
     ) -> None:
         """
@@ -66,10 +66,20 @@ class RiverFlowDataset(Dataset[Any]):
         else:
             self.target_stations = target_stations
 
-        self.index_features = index_features
-        self.surface_features = surface_features
-        self.cloud_features = cloud_features
         self.time_features = time_features
+
+        if ndsi is not None:
+            # If any of the features are used store that in boolean
+            self.ndsi_features = ndsi.index or ndsi.surface or ndsi.cloud
+            self.ndsi_index = ndsi.index
+            self.ndsi_surface = ndsi.surface
+            self.ndsi_cloud = ndsi.cloud
+
+        if ndvi is not None:
+            self.ndvi_features = ndvi.index or ndvi.surface or ndvi.cloud
+            self.ndvi_index = ndvi.index
+            self.ndvi_surface = ndvi.surface
+            self.ndvi_cloud = ndvi.cloud
 
         self.data_date_dict = OrderedDict()  # type: DataDateDictType
 
@@ -92,46 +102,23 @@ class RiverFlowDataset(Dataset[Any]):
 
         # Add time features if needed
         if self.time_features:
-            # For the weekly scale we can use both month and
-            # week as a cyclical feature
-            if self.freq == "W":
-                df_features = (
-                    df_features.assign(
-                        month=df_features.date.dt.month,
-                        week=df_features.date.dt.isocalendar().week)
-                )
-                df_features = generate_cyclical_features(df_features,
-                                                         "month", 12, 1)
-                df_features = generate_cyclical_features(df_features,
-                                                         "week", 52, 1)
-            elif self.freq == "M":
-                df_features = (
-                    df_features.assign(
-                        month=df_features.date.dt.month)
-                )
-                df_features = generate_cyclical_features(df_features,
-                                                         "month", 12, 1)
+            df_features, self.lagged_vars = set_time_features(self.freq, df_features, self.lagged_vars)
 
-        df_ndsi, df_ndvi = gather_ndsi_ndvi_data()
+        if self.ndsi_features:
 
-        # TODO: Make it so only certain watersheds are selected in case of certain measurement stations 
-        if self.index_features:
-            index_df = aggregate_index_data(self.freq, df_ndsi, df_ndvi)
-            df_features = pd.merge(df_features, index_df, how="left", on="date")
-            self.lagged_vars += ["ndsi_avg", "ndvi_avg"]
+            df_features, self.lagged_vars = load_and_aggregate_ndsi_ndvi_data(
+                "NDSI", self.root, df_features, self.freq, self.lagged_vars,
+                self.ndsi_index, self.ndsi_surface, self.ndsi_cloud
+            )
 
-        if self.surface_features:
-            surface_df = aggregate_area_data(self.freq, df_ndsi, df_ndvi, "Surfavg")
-            df_features = pd.merge(df_features, surface_df, how="left", on="date")
-            self.lagged_vars += ["ndsi_Surfavg", "ndvi_Surfavg"]
+        if self.ndvi_features:
 
-        if self.cloud_features:
-            cloud_df = aggregate_area_data(self.freq, df_ndsi, df_ndvi, "Surfcloudavg")
-            df_features = pd.merge(df_features, cloud_df, how="left", on="date")
-            self.lagged_vars += ["ndsi_Surfcloudavg", "ndvi_Surfcloudavg"]
+            df_features, self.lagged_vars = load_and_aggregate_ndsi_ndvi_data(
+                "NDVI", self.root, df_features, self.freq, self.lagged_vars,
+                self.ndvi_index, self.ndvi_surface, self.ndvi_cloud
+            )
 
         df_flow_lagged = generate_lags(df_features, self.lagged_vars, self.lag)
-
         df_flow_lagged = generate_lags(df_flow_lagged, [self.target_var], -self.n_preds)
 
         # Drop any date for which any of the target stations has no measurement
@@ -159,9 +146,6 @@ class RiverFlowDataset(Dataset[Any]):
         )
 
         unique_dates = df_flow_lagged.date.unique()
-
-        date = np.datetime64('2001-10-31')
-
         df_stations_date = df_features.loc[df_features["station_number"].isin(self.lagged_stations)]
 
         for date in unique_dates:
@@ -172,56 +156,39 @@ class RiverFlowDataset(Dataset[Any]):
             df_stations_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.lagged_stations)]
 
             # Concatenate all lagged variables we want into one input vector
-            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("river_flow-\\d")]
+            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("river_flow-\\d+")]
 
             date_features = df_date_features.to_numpy(dtype=np.float32).T
 
             if self.time_features:
-                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("((sin)|(cos))_.*")]
+                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("((sin)|(cos))_.*\\d+")]
+                # We sort the time features so we get
+                # [sin_1, cos_1, sin_2, cos_2, ..., sin_24, cos_24]
+                # regex there for more than one digit
+                df_time_features = df_time_features[sorted(df_time_features.columns, key=lambda x: int(re.search(r'\d+$', x).group()))]
 
                 # Only add one time feature as they are the same across the stations
-                time_features = df_time_features.to_numpy(dtype=np.float32)[0, :]
-
-                # Reshaping tricks to properly stack sin cos on top of river flow feature
-                time_features = time_features.reshape(1, -1)
-                time_features = np.repeat(time_features, self.lag, axis=0)
+                time_features = df_time_features.to_numpy(dtype=np.float32)[0, :][None, :]
+                time_features = time_features.reshape((self.lag, -1))
                 date_features = np.append(date_features, time_features, axis=1)
 
-            if self.index_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_avg-\\d")]
-                ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
+            if self.ndsi_features:
 
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_avg-\\d")]
-                ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
+                date_features = append_ndsi_ndvi_features(
+                    "NDSI", df_stations_date, date_features, self.ndsi_index,
+                    self.ndsi_surface, self.ndsi_cloud)
 
-                ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
-                date_features = np.append(date_features, ndsi_ndvi_feature, axis=1)
+            if self.ndvi_features:
 
-            if self.surface_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_Surfavg-\\d")]
-                ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
-
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_Surfavg-\\d")]
-                ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
-
-                ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
-                date_features = np.append(date_features, ndsi_ndvi_feature, axis=1)
-
-            if self.cloud_features:
-                df_ndsi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndsi_Surfcloudavg-\\d")]
-                ndsi_feature = df_ndsi_feature.to_numpy(dtype=np.float32).T
-
-                df_ndvi_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("ndvi_Surfcloudavg-\\d")]
-                ndvi_feature = df_ndvi_feature.to_numpy(dtype=np.float32).T
-
-                ndsi_ndvi_feature = np.append(ndsi_feature, ndvi_feature, axis=1)
-                date_features = np.append(date_features, ndsi_ndvi_feature, axis=1)
+                date_features = append_ndsi_ndvi_features(
+                    "NDVI", df_stations_date, date_features, self.ndvi_index,
+                    self.ndvi_surface, self.ndvi_cloud)
 
             date_features = torch.from_numpy(date_features)
 
             # Extract targets
             df_target_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.target_stations)]
-            df_targets_date = df_target_date.loc[:, df_target_date.columns.str.fullmatch("river_flow\\+\\d")]
+            df_targets_date = df_target_date.loc[:, df_target_date.columns.str.fullmatch("river_flow\\+\\d+")]
             date_targets = torch.from_numpy(df_targets_date.to_numpy(dtype=np.float32))
 
             self.data_date_dict[date] = (date_features, date_targets)
@@ -349,6 +316,87 @@ def load_and_aggregate_flow_data(
     return df_flow_aggregated
 
 
+def load_and_aggregate_ndsi_ndvi_data(
+    name: str, root: Union[str, os.PathLike[Any]], df_features: pd.DataFrame,
+    freq: str, lagged_vars: List[str], index: bool, surface: bool, cloud: bool
+) -> Tuple[pd.DataFrame, List[str]]:
+
+    df = gather_ndsi_ndvi_data(root, f"{name}.csv")
+
+    if index:
+        index_df = aggregate_index_data(name, freq, df)
+        df_features = pd.merge(df_features, index_df, how="left")
+        lagged_vars += [f"{name}_avg"]
+
+    if surface:
+        surface_df = aggregate_area_data(name, freq, df, "Surfavg")
+        df_features = pd.merge(df_features, surface_df, how="left")
+        lagged_vars += [f"{name}_Surfavg"]
+
+    if cloud:
+        cloud_df = aggregate_area_data(name, freq, df, "Surfcloudavg")
+        df_features = pd.merge(df_features, cloud_df, how="left")
+        lagged_vars += [f"{name}_Surfcloudavg"]
+
+    return df_features, lagged_vars
+
+
+def set_time_features(
+    freq: str, df_features: pd.DataFrame, lagged_vars: List[str]
+) -> Tuple[pd.DataFrame, List[str]]:
+    if freq == "W":
+        df_features = (
+            df_features.assign(
+                month=df_features.date.dt.month,
+                week=df_features.date.dt.isocalendar().week)
+        )
+        df_features = generate_cyclical_features(df_features,
+                                                 "month", 12, 1)
+        df_features = generate_cyclical_features(df_features,
+                                                 "week", 52, 1)
+        lagged_vars += ["sin_month", "cos_month"]
+        lagged_vars += ["sin_week", "cos_week"]
+
+    elif freq == "M":
+        df_features = (
+            df_features.assign(
+                month=df_features.date.dt.month)
+        )
+        df_features = generate_cyclical_features(df_features,
+                                                 "month", 12, 1)
+        lagged_vars += ["sin_month", "cos_month"]
+
+    return df_features, lagged_vars
+
+
+def append_ndsi_ndvi_features(
+    name: str, df_stations_date: pd.DataFrame,
+    date_features: npt.NDArray[np.float32],
+    index: bool, surface: bool, cloud: bool
+) -> npt.NDArray[np.float32]:
+
+    if index:
+        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_avg-\\d+")]
+
+        # We only want one of them as they are copies of each other
+        # as we are aggregating over the whole watershed
+        feature = df_feature.to_numpy(dtype=np.float32).T[:, 0][:, None]
+
+        date_features = np.append(date_features, feature, axis=1)
+
+    if surface:
+        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_Surfavg-\\d+")]
+        feature = df_feature.to_numpy(dtype=np.float32).T
+        date_features = np.append(date_features, feature, axis=1)
+
+    if cloud:
+        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_Surfcloudavg-\\d+")]
+        feature = df_feature.to_numpy(dtype=np.float32).T
+        date_features = np.append(date_features, feature, axis=1)
+
+    return date_features
+
+
 def generate_lags(
     df: pd.DataFrame, values: List[str], n_lags: int
 ) -> pd.DataFrame:
@@ -431,8 +479,10 @@ def get_scaler(scaler: str) -> ScalerType:
 
 
 def gather_ndsi_ndvi_data(
+    root: Union[str, os.PathLike[Any]],
+    filename: str,
     watersheds: Optional[List[str]] = None
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """
     This function returns the full processed data using various arguments
     as a pd.DataFrame
@@ -440,8 +490,6 @@ def gather_ndsi_ndvi_data(
         watersheds: list of strings denoting what watersheds to use from data
         lag: amount of time lag to be used as features
     """
-    processed_folder_path = os.path.join("data", "processed")
-
     if watersheds is None:
 
         watersheds = ["03400", "03401", "03402",
@@ -449,25 +497,20 @@ def gather_ndsi_ndvi_data(
                       "03411", "03412", "03413",
                       "03414", "03420", "03421"]
 
-    df_NDSI = pd.read_csv(os.path.join(processed_folder_path, "NDSI.csv"),
-                          index_col=0, parse_dates=["date"],
-                          dtype={"Subsubwatershed": str})
-    df_NDVI = pd.read_csv(os.path.join(processed_folder_path, "NDVI.csv"),
-                          index_col=0, parse_dates=["date"],
-                          dtype={"Subsubwatershed": str})
+    df = pd.read_csv(os.path.join(root, filename),
+                     index_col=0, parse_dates=["date"],
+                     dtype={"Subsubwatershed": str})
 
     # Only preserve rows inside subsubwatershed list
-    keep_rows_ndsi = df_NDSI[df_NDSI.Subsubwatershed.isin(watersheds)].index
-    keep_rows_ndvi = df_NDVI[df_NDVI.Subsubwatershed.isin(watersheds)].index
+    keep_rows = df[df.Subsubwatershed.isin(watersheds)].index
 
-    df_NDSI = df_NDSI[df_NDSI.index.isin(keep_rows_ndsi)]
-    df_NDVI = df_NDVI[df_NDVI.index.isin(keep_rows_ndvi)]
+    df = df[df.index.isin(keep_rows)]
 
-    return df_NDSI, df_NDVI
+    return df
 
 
 def aggregate_area_data(
-    freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame, column: str
+    name: str, freq: str, df: pd.DataFrame, column: str
 ) -> pd.DataFrame:
     """
     This function will correctly aggregate area data given the column
@@ -479,35 +522,20 @@ def aggregate_area_data(
     """
     assert "Surf" in column
 
-    # Take sum of each day and average over the months to aggregate area data
-    daily_ndsi_surf_sum = df_NDSI.groupby(
-                            pd.Grouper(key='date', freq="D")
-                        )[[column]].sum().reset_index()
-    daily_ndvi_surf_sum = df_NDVI.groupby(
-                            pd.Grouper(key='date', freq="D")
-                        )[[column]].sum().reset_index()
+    grouped_df = df.groupby("date")[[column]].sum().reset_index()
 
-    monthly_ndsi_surf_mean = daily_ndsi_surf_sum.groupby(
+    freq_surf_mean = grouped_df.groupby(
                                 pd.Grouper(key='date', freq=freq)
-                            )[[column]].mean()
-    monthly_ndvi_surf_mean = daily_ndvi_surf_sum.groupby(
-                                pd.Grouper(key='date', freq=freq)
-                            )[[column]].mean()
+                            ).mean().reset_index()
 
-    surf_ndsi_mean_df = monthly_ndsi_surf_mean.reset_index()
-    surf_ndvi_mean_df = monthly_ndvi_surf_mean.reset_index()
-    surf_ndsi_mean_df = surf_ndsi_mean_df.rename({column: f"ndsi_{column}"},
-                                                 axis="columns")
-    surf_ndvi_mean_df = surf_ndvi_mean_df.rename({column: f"ndvi_{column}"},
-                                                 axis="columns")
+    freq_surf_mean = freq_surf_mean.rename({column: f"{name}_{column}"},
+                                           axis="columns")
 
-    surf_ndsi_ndvi_df = pd.merge(surf_ndsi_mean_df, surf_ndvi_mean_df)
-
-    return surf_ndsi_ndvi_df
+    return freq_surf_mean
 
 
 def aggregate_index_data(
-    freq: str, df_NDSI: pd.DataFrame, df_NDVI: pd.DataFrame
+    name: str, freq: str, df: pd.DataFrame
 ) -> pd.DataFrame:
     """
     Returns the aggregated NDSI NDVI data with lagged variables
@@ -517,32 +545,9 @@ def aggregate_index_data(
     """
 
     # Take average of NDSI values for each month and aggregate
-    monthly_ndsi_mean = df_NDSI.groupby(pd.Grouper(
-                            key='date', freq=freq)
-                        )[["avg"]].mean()
-    monthly_ndvi_mean = df_NDVI.groupby(pd.Grouper(
-                            key='date', freq=freq)
-                        )[["avg"]].mean()
+    freq_mean = df.groupby(pd.Grouper(key='date', freq=freq))[["avg"]].mean()
+    freq_mean = freq_mean.reset_index()
 
-    # Rename columns to enable merging
-    ndsi_mean_df = monthly_ndsi_mean.reset_index()
-    ndvi_mean_df = monthly_ndvi_mean.reset_index()
+    mean_df = freq_mean.rename({"avg": f"{name}_avg"}, axis="columns")
 
-    ndsi_mean_df = ndsi_mean_df.rename({"avg": "ndsi_avg"}, axis="columns")
-    ndvi_mean_df = ndvi_mean_df.rename({"avg": "ndvi_avg"}, axis="columns")
-
-    # Merge ndvi and ndsi dataframes into one
-    ndsi_ndvi_df = pd.merge(ndsi_mean_df, ndvi_mean_df)
-
-    return ndsi_ndvi_df
-
-
-if __name__ == "__main__":
-    x = RiverFlowDataset(freq="M", lag=6, lagged_stations=[34], n_preds=6, target_stations=[34], scaler_name="none", process=True, time_features=True, index_features=False)
-
-    date = np.datetime64('2001-09-30')
-
-    sample = x.get_item_by_date(date)
-
-    print(date)
-    print(sample)
+    return mean_df
