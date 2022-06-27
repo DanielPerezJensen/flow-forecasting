@@ -92,16 +92,6 @@ def train(cfg: DictConfig) -> None:
         elif cfg.model.name == "lstm":
             model = models.LSTM(input_dim, output_dim, scaler, cfg)
 
-        # Add early stopping callback if configuration calls for it
-        callbacks = []  # type: List[Callback]
-
-        if cfg.training.early_stopping:
-            early_stop_callback = EarlyStopping(monitor="val_loss_epoch",
-                                                min_delta=0.00,
-                                                patience=cfg.training.patience,
-                                                verbose=True, mode="min")
-            callbacks.append(early_stop_callback)
-
         # Set logger based on configuration file
         logger = set_logger(model, cfg)
 

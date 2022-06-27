@@ -28,9 +28,6 @@ training:
   gpu: 0
   epochs: 50
   batch_size: 256
-  bias: True
-  early_stopping: False
-  patience: 5
 
 data:
   scaler_name: none

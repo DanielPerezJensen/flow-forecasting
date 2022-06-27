@@ -136,7 +136,6 @@ class HeteroSeqLSTM(pl.LightningModule):
             eval_dict[f"train_{k}"] = eval_dict.pop(k)
 
         self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
-
     def validation_epoch_end(
         self, validation_step_outputs
     ) -> None:

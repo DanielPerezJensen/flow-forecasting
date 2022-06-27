@@ -24,11 +24,8 @@ run:
 training:
   seeds: [42]
   gpu: 1
-  epochs: 25
-  batch_size: 32
-  bias: True
-  early_stopping: False
-  patience: 5
+  epochs: 50
+  batch_size: 256
 
 data:
   scaler_name: none
