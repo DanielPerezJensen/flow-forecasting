@@ -41,15 +41,8 @@ def train(cfg: DictConfig) -> None:
                 **cfg.data
             )
 
-    # the amount of variables we lag is dictated by the frequency
-    if cfg.data.freq == "M":
-        lag = 6
-    elif cfg.data.freq == "W":
-        lag = 24
-
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
-                                          lag=lag,
                                           val_year_min=1999,
                                           val_year_max=2004,
                                           test_year_min=1974,
@@ -84,15 +77,6 @@ def train(cfg: DictConfig) -> None:
         else:
             model(batch.x_dict, batch.edge_index_dict)
 
-    # Add various callback if configuration calls for it
-    callbacks = []  # type: List[Callback]
-
-    if cfg.training.early_stopping:
-        callbacks.append(EarlyStopping(monitor="val_rmse",
-                                       min_delta=0.00,
-                                       patience=cfg.training.patience,
-                                       verbose=True, mode="min"))
-
     # Set logger based on configuration file
     logger = set_logger(model, cfg)
 
@@ -100,7 +84,6 @@ def train(cfg: DictConfig) -> None:
                          max_epochs=cfg.training.epochs,
                          deterministic=True,
                          logger=logger,
-                         callbacks=callbacks,
                          log_every_n_steps=1)
 
     trainer.fit(model, train_loader, val_loader)

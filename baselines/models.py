@@ -121,7 +121,9 @@ class MLP(pl.LightningModule):
 
         self.layers.append(nn.Linear(layer_sizes[-1], output_dim))
 
-        self.model = nn.Sequential(*self.layers)  # type: Callable[[torch.Tensor], torch.Tensor]
+        # Typing of the sequential layers
+        self.model: Callable[[torch.Tensor], torch.Tensor]
+        self.model = nn.Sequential(*self.layers)
 
     def forward(self, x: Tensor) -> Tensor:
         x = torch.flatten(x, start_dim=1)
@@ -178,7 +180,7 @@ class MLP(pl.LightningModule):
         for k in eval_dict.copy():
             eval_dict[f"val_{k}"] = eval_dict.pop(k)
 
-        self.log_dict(eval_dict, on_epoch=True)
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def test_epoch_end(
         self, test_step_outputs: List[Dict[str, torch.Tensor]]
@@ -218,8 +220,9 @@ class GRU(pl.LightningModule):
             batch_first=True, dropout=self.dropout_prob
         )
 
-        # Fully connected layer
-        self.fc = nn.Linear(self.hidden_dim, self.output_dim)  # type: Callable[[torch.Tensor], torch.Tensor]
+        # Typing option of fully connected output layer
+        self.fc: Callable[[torch.Tensor], torch.Tensor]
+        self.fc = nn.Linear(self.hidden_dim, self.output_dim)
 
         self.scaler = scaler
         self.cfg = cfg
@@ -292,7 +295,7 @@ class GRU(pl.LightningModule):
         for k in eval_dict.copy():
             eval_dict[f"val_{k}"] = eval_dict.pop(k)
 
-        self.log_dict(eval_dict, on_epoch=True)
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def test_epoch_end(
         self, test_step_outputs: List[Dict[str, torch.Tensor]]
@@ -332,8 +335,9 @@ class LSTM(pl.LightningModule):
             batch_first=True, dropout=cfg.model.dropout_prob
         )
 
-        # Fully connected layer
-        self.fc = nn.Linear(cfg.model.hidden_dim, output_dim)  # type: Callable[[torch.Tensor], torch.Tensor]
+        # Typing option of fully connected output layer
+        self.fc: Callable[[torch.Tensor], torch.Tensor]
+        self.fc = nn.Linear(cfg.model.hidden_dim, output_dim)
 
         self.scaler = scaler
         self.cfg = cfg
@@ -404,7 +408,7 @@ class LSTM(pl.LightningModule):
         for k in eval_dict.copy():
             eval_dict[f"val_{k}"] = eval_dict.pop(k)
 
-        self.log_dict(eval_dict, on_epoch=True)
+        self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
 
     def test_epoch_end(
         self, test_step_outputs: List[Dict[str, torch.Tensor]]

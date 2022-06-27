@@ -31,8 +31,6 @@ class RiverFlowDataset(Dataset[Any]):
         root: Optional[Union[str, os.PathLike[Any]]] = None,
         scaler_name: str = "none",
         freq: str = "M",
-        lag: int = 6,
-        n_preds: int = 6,
         lagged_vars: Optional[List[str]] = None,
         lagged_stations: Optional[List[int]] = None,
         target_var: str = "river_flow",
@@ -52,8 +50,14 @@ class RiverFlowDataset(Dataset[Any]):
 
         self.freq = freq
         self.scaler_name = scaler_name
-        self.lag = lag
-        self.n_preds = n_preds
+
+        # Set lag and amount of prediction according to frequency
+        if self.freq == "M":
+            self.lag = 6
+        elif self.freq == "W":
+            self.lag = 24
+
+        self.n_preds = self.lag
 
         self.lagged_vars = lagged_vars if lagged_vars else ["river_flow"]
 
@@ -102,7 +106,9 @@ class RiverFlowDataset(Dataset[Any]):
 
         # Add time features if needed
         if self.time_features:
-            df_features, self.lagged_vars = set_time_features(self.freq, df_features, self.lagged_vars)
+            df_features, self.lagged_vars = set_time_features(
+                self.freq, df_features, self.lagged_vars
+            )
 
         if self.ndsi_features:
 
@@ -119,12 +125,20 @@ class RiverFlowDataset(Dataset[Any]):
             )
 
         df_flow_lagged = generate_lags(df_features, self.lagged_vars, self.lag)
-        df_flow_lagged = generate_lags(df_flow_lagged, [self.target_var], -self.n_preds)
+        df_flow_lagged = generate_lags(df_flow_lagged,
+                                       [self.target_var], -self.n_preds)
 
         # Drop any date for which any of the target stations has no measurement
-        df_target_stations = df_flow_lagged[df_flow_lagged.station_number.isin(self.target_stations)]
-        dropped_dates = df_target_stations[df_target_stations[self.target_var].isna()]["date"]
-        df_flow_lagged = df_flow_lagged.drop(df_flow_lagged.index[df_flow_lagged.date.isin(dropped_dates)])
+        df_target_stations = df_flow_lagged[
+            df_flow_lagged.station_number.isin(self.target_stations)
+        ]
+        dropped_dates = df_target_stations[
+            df_target_stations[self.target_var].isna()
+        ]["date"]
+
+        df_flow_lagged = df_flow_lagged.drop(
+            df_flow_lagged.index[df_flow_lagged.date.isin(dropped_dates)]
+        )
 
         # Data imputation
         df_flow_lagged = df_flow_lagged.fillna(-1)
@@ -133,7 +147,9 @@ class RiverFlowDataset(Dataset[Any]):
         self.scaler = get_scaler(self.scaler_name)  # type: ScalerType
 
         flow_scaled_cols = [
-            col for col in df_flow_lagged if col not in [self.target_var, "date", "station_number"]
+            col for col in df_flow_lagged if col not in [
+                self.target_var, "date", "station_number"
+            ]
         ]
 
         df_flow_lagged[flow_scaled_cols] = self.scaler.fit_transform(
@@ -146,31 +162,52 @@ class RiverFlowDataset(Dataset[Any]):
         )
 
         unique_dates = df_flow_lagged.date.unique()
-        df_stations_date = df_features.loc[df_features["station_number"].isin(self.lagged_stations)]
+        df_stations_date = df_features.loc[
+            df_features["station_number"].isin(self.lagged_stations)
+        ]
 
         for date in unique_dates:
             date = np.datetime64(date, "D")
 
-            df_flow_date = df_flow_lagged.loc[df_flow_lagged.date == date].sort_values("station_number")
+            df_flow_date = df_flow_lagged.loc[
+                df_flow_lagged.date == date
+            ].sort_values("station_number")
 
-            df_stations_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.lagged_stations)]
+            df_stations_date = df_flow_date.loc[
+                df_flow_date["station_number"].isin(self.lagged_stations)
+            ]
 
             # Concatenate all lagged variables we want into one input vector
-            df_date_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("river_flow-\\d+")]
+            df_date_features = df_stations_date.loc[
+                :, df_stations_date.columns.str.fullmatch("river_flow-\\d+")
+            ]
 
-            date_features = df_date_features.to_numpy(dtype=np.float32).T
+            date_features = torch.from_numpy(
+                df_date_features.to_numpy(dtype=np.float32).T
+            )
 
             if self.time_features:
-                df_time_features = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch("((sin)|(cos))_.*\\d+")]
+                df_time_features = df_stations_date.loc[
+                    :, df_stations_date.columns.str.fullmatch(
+                        "((sin)|(cos))_.*\\d+"
+                    )
+                ]
                 # We sort the time features so we get
                 # [sin_1, cos_1, sin_2, cos_2, ..., sin_24, cos_24]
                 # regex there for more than one digit
-                df_time_features = df_time_features[sorted(df_time_features.columns, key=lambda x: int(re.search(r'\d+$', x).group()))]
+                df_time_features = df_time_features[
+                    sorted(df_time_features.columns,
+                           key=lambda x: int(re.search(r'\d+$', x).group()))
+                ]
 
-                # Only add one time feature as they are the same across the stations
-                time_features = df_time_features.to_numpy(dtype=np.float32)[0, :][None, :]
+                # Only add one time feature as they are equal across stations
+                time_features = torch.from_numpy(
+                    df_time_features.to_numpy()[0, :][None, :]
+                )
+
                 time_features = time_features.reshape((self.lag, -1))
-                date_features = np.append(date_features, time_features, axis=1)
+                date_features = torch.cat([date_features, time_features],
+                                          dim=1)
 
             if self.ndsi_features:
 
@@ -184,14 +221,25 @@ class RiverFlowDataset(Dataset[Any]):
                     "NDVI", df_stations_date, date_features, self.ndvi_index,
                     self.ndvi_surface, self.ndvi_cloud)
 
-            date_features = torch.from_numpy(date_features)
-
             # Extract targets
-            df_target_date = df_flow_date.loc[df_flow_date["station_number"].isin(self.target_stations)]
-            df_targets_date = df_target_date.loc[:, df_target_date.columns.str.fullmatch("river_flow\\+\\d+")]
-            date_targets = torch.from_numpy(df_targets_date.to_numpy(dtype=np.float32))
+            df_target_date = df_flow_date.loc[
+                df_flow_date["station_number"].isin(self.target_stations)
+            ]
 
-            self.data_date_dict[date] = (date_features, date_targets)
+            df_targets_date = df_target_date.loc[
+                :, df_target_date.columns.str.fullmatch("river_flow\\+\\d+")
+            ]
+
+            date_targets = torch.from_numpy(df_targets_date.to_numpy())
+
+            # We always want 6 predictions, so aggregate weekly into monthly
+            if self.freq == "W":
+                date_targets = date_targets.reshape(
+                    (len(self.target_stations), -1, 4)
+                ).mean(dim=2)
+
+            self.data_date_dict[date] = (date_features.float(),
+                                         date_targets.float())
 
         self.data_list = list(self.data_date_dict.values())
 
@@ -234,9 +282,9 @@ def split_dataset(
     assert test_year_min < test_year_max
 
     if cfg.freq == "M":
-        offset = pd.tseries.offsets.DateOffset(months=cfg.lag)
+        offset = pd.tseries.offsets.DateOffset(months=dataset.lag)
     if cfg.freq == "W":
-        offset = pd.tseries.offsets.DateOffset(weeks=cfg.lag)
+        offset = pd.tseries.offsets.DateOffset(weeks=dataset.lag)
 
     train_dataset = RiverFlowDataset(**cfg)
     val_dataset = RiverFlowDataset(**cfg)
@@ -249,19 +297,15 @@ def split_dataset(
     test_end = np.datetime64(str(test_year_max), "D")
 
     for date in dataset.data_date_dict:
-        if val_start <= date < val_end:
+        if val_start <= date < val_end - offset:
             val_dataset.set_data(date, dataset.get_item_by_date(date))
-        elif test_start <= date < test_end:
+        elif test_start <= date < test_end - offset:
             test_dataset.set_data(date, dataset.get_item_by_date(date))
         # These dates are not allowed in the training set as
         # they are found as features in the validation or test set
-        elif val_start - offset <= date < val_start:
+        elif val_start - offset <= date < val_end:
             continue
-        elif val_end <= date < val_end + offset:
-            continue
-        elif test_start - offset <= date < test_start:
-            continue
-        elif test_end <= date < test_end + offset:
+        elif test_start - offset <= date < test_end:
             continue
         else:
             train_dataset.set_data(date, dataset.get_item_by_date(date))
@@ -371,28 +415,44 @@ def set_time_features(
 
 def append_ndsi_ndvi_features(
     name: str, df_stations_date: pd.DataFrame,
-    date_features: npt.NDArray[np.float32],
+    date_features: torch.Tensor,
     index: bool, surface: bool, cloud: bool
-) -> npt.NDArray[np.float32]:
+) -> torch.Tensor:
 
     if index:
-        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_avg-\\d+")]
+        df_feature = df_stations_date.loc[
+            :, df_stations_date.columns.str.fullmatch(f"{name}_avg-\\d+")
+        ]
 
         # We only want one of them as they are copies of each other
         # as we are aggregating over the whole watershed
-        feature = df_feature.to_numpy(dtype=np.float32).T[:, 0][:, None]
+        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
 
-        date_features = np.append(date_features, feature, axis=1)
+        date_features = torch.cat((date_features, feature), dim=1)
 
     if surface:
-        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_Surfavg-\\d+")]
-        feature = df_feature.to_numpy(dtype=np.float32).T
-        date_features = np.append(date_features, feature, axis=1)
+        df_feature = df_stations_date.loc[
+            :, df_stations_date.columns.str.fullmatch(f"{name}_Surfavg-\\d+")
+        ]
+
+        # We only want one of them as they are copies of each other
+        # as we are aggregating over the whole watershed
+        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
+
+        date_features = torch.cat((date_features, feature), dim=1)
 
     if cloud:
-        df_feature = df_stations_date.loc[:, df_stations_date.columns.str.fullmatch(f"{name}_Surfcloudavg-\\d+")]
-        feature = df_feature.to_numpy(dtype=np.float32).T
-        date_features = np.append(date_features, feature, axis=1)
+        df_feature = df_stations_date.loc[
+            :, df_stations_date.columns.str.fullmatch(
+                    f"{name}_Surfcloudavg-\\d+"
+                )
+        ]
+
+        # We only want one of them as they are copies of each other
+        # as we are aggregating over the whole watershed
+        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
+
+        date_features = torch.cat((date_features, feature), dim=1)
 
     return date_features
 
@@ -428,12 +488,14 @@ def generate_lags(
             if sign == "-":
                 for n in range(1, n_lags + 1):
                     add_columns.append(
-                        pd.Series(df_n[f"{value}"].shift(n), name=f"{value}{sign}{n}")
+                        pd.Series(df_n[f"{value}"].shift(n),
+                                  name=f"{value}{sign}{n}")
                     )
             elif sign == "+":
                 for n in range(0, -(n_lags)):
                     add_columns.append(
-                        pd.Series(df_n[f"{value}"].shift(-n), name=f"{value}{sign}{n}")
+                        pd.Series(df_n[f"{value}"].shift(-n),
+                                  name=f"{value}{sign}{n}")
                     )
 
         add_df = pd.concat(add_columns, axis=1)
