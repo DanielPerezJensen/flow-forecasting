@@ -202,7 +202,7 @@ class RiverFlowDataset(Dataset[Any]):
 
                 # Only add one time feature as they are equal across stations
                 time_features = torch.from_numpy(
-                    df_time_features.to_numpy()[0, :][None, :]
+                    df_time_features.to_numpy(dtype="float32")[0, :][None, :]
                 )
 
                 time_features = time_features.reshape((self.lag, -1))
@@ -230,7 +230,9 @@ class RiverFlowDataset(Dataset[Any]):
                 :, df_target_date.columns.str.fullmatch("river_flow\\+\\d+")
             ]
 
-            date_targets = torch.from_numpy(df_targets_date.to_numpy())
+            date_targets = torch.from_numpy(
+                df_targets_date.to_numpy(dtype="float32")
+            )
 
             # We always want 6 predictions, so aggregate weekly into monthly
             if self.freq == "W":
@@ -253,12 +255,13 @@ class RiverFlowDataset(Dataset[Any]):
         self.data_date_dict[date] = value
         self.data_list = list(self.data_date_dict.values())
 
-    def get_item_by_date(self, date: np.datetime64) -> BatchType:
+    def get_item_by_date(self, date: Union[np.datetime64, str]) -> BatchType:
         """
         Returns a batch item using a date from the OrderedDict
         Args:
             date: np.datetime64
         """
+        date = np.datetime64(date)
         return self.data_date_dict[date]
 
     def __repr__(self) -> str:
@@ -426,7 +429,9 @@ def append_ndsi_ndvi_features(
 
         # We only want one of them as they are copies of each other
         # as we are aggregating over the whole watershed
-        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
+        feature = torch.from_numpy(
+            df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
+        )
 
         date_features = torch.cat((date_features, feature), dim=1)
 
@@ -437,7 +442,9 @@ def append_ndsi_ndvi_features(
 
         # We only want one of them as they are copies of each other
         # as we are aggregating over the whole watershed
-        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
+        feature = torch.from_numpy(
+            df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
+        )
 
         date_features = torch.cat((date_features, feature), dim=1)
 
@@ -450,7 +457,9 @@ def append_ndsi_ndvi_features(
 
         # We only want one of them as they are copies of each other
         # as we are aggregating over the whole watershed
-        feature = torch.from_numpy(df_feature.to_numpy().T[:, 0][:, None])
+        feature = torch.from_numpy(
+            df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
+        )
 
         date_features = torch.cat((date_features, feature), dim=1)
 
@@ -584,16 +593,22 @@ def aggregate_area_data(
     """
     assert "Surf" in column
 
-    grouped_df = df.groupby("date")[[column]].sum().reset_index()
+    grouped_df = df.groupby("date")[[column]].sum()
 
-    freq_surf_mean = grouped_df.groupby(
-                                pd.Grouper(key='date', freq=freq)
-                            ).mean().reset_index()
+    # NDSI collected bimonthly so is treated differently
+    if name == "NDVI" and freq == "W":
+        freq_aggr = grouped_df.resample("D").ffill()[[column]]
+        freq_aggr = freq_aggr.groupby(pd.Grouper(freq=freq))[[column]].mean()
+    else:
+        freq_aggr = grouped_df.groupby(
+            pd.Grouper(key='date', freq=freq)
+        ).mean()
 
-    freq_surf_mean = freq_surf_mean.rename({column: f"{name}_{column}"},
-                                           axis="columns")
+    freq_aggr = freq_aggr.reset_index()
+    freq_aggr = freq_aggr.rename({column: f"{name}_{column}"},
+                                 axis="columns")
 
-    return freq_surf_mean
+    return freq_aggr
 
 
 def aggregate_index_data(
@@ -605,11 +620,20 @@ def aggregate_index_data(
         df_NDSI: dataframe containing filtered NDSI values
         df_NDVI: dataframe containing filtered NDVI values
     """
+    df = df.sort_values(["date", "Subsubwatershed"])
 
-    # Take average of NDSI values for each month and aggregate
-    freq_mean = df.groupby(pd.Grouper(key='date', freq=freq))[["avg"]].mean()
-    freq_mean = freq_mean.reset_index()
+    # NDSI collected bimonthly so is treated differently
+    if name == "NDVI" and freq == "W":
+        freq_aggr = df.groupby("date").mean()
+        freq_aggr = freq_aggr.resample("D").ffill()[["avg"]]
+        freq_aggr = freq_aggr.groupby(pd.Grouper(freq=freq))[["avg"]].mean()
+    else:
+        # Take average of NDSI values for each month and aggregate
+        freq_aggr = df.groupby(
+            pd.Grouper(key='date', freq=freq)
+        )[["avg"]].mean()
 
-    mean_df = freq_mean.rename({"avg": f"{name}_avg"}, axis="columns")
+    freq_aggr = freq_aggr.reset_index()
+    freq_aggr = freq_aggr.rename({"avg": f"{name}_avg"}, axis="columns")
 
-    return mean_df
+    return freq_aggr
