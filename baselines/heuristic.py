@@ -17,8 +17,9 @@ import plotting
 from data import RiverFlowDataset
 
 # Typing imports
-from typing import Dict, Union, Tuple
+from typing import Dict, Union, Tuple, Any, List
 import numpy.typing as npt
+import pandas as pd
 
 
 class PreviousMonthPredictor:
@@ -36,12 +37,15 @@ class PreviousMonthPredictor:
         next(b, None)
 
         for date, next_date in zip(a, b):
-            next_value = self.dataset.get_item_by_date(date)[1].item()
+            next_value = self.dataset.get_item_by_date(date)[1][0][0].item()
             self.fit_dict[next_date] = next_value
 
-    def predict(self, inp: Union[str, np.datetime64]) -> float:
-        date = np.datetime64(inp)
-        return self.fit_dict[date]
+    def predict(self, inp: Union[str, np.datetime64]) -> List[float]:
+        date = np.datetime64(inp, "D")
+
+        out = [self.fit_dict[date] for _ in range(6)]
+
+        return out
 
 
 class AverageMonthPredictor:
@@ -57,7 +61,7 @@ class AverageMonthPredictor:
             date_string_split = date_string.split('-')
             month = int(date_string_split[1])
             self.month_data[month].append(
-                self.dataset.get_item_by_date(date)[1].item()
+                self.dataset.get_item_by_date(date)[1][0][0].item()
             )
 
         self.month_fit = {}  # type: Dict[int, float]
@@ -66,11 +70,13 @@ class AverageMonthPredictor:
             self.month_fit[month] = np.mean(self.month_data[month])
 
     def predict(self, inp: Union[str, np.datetime64]) -> float:
-        date = np.datetime64(inp)
-        date_string = date.astype(str)  # type: str
-        date_string_split = date_string.split('-')
-        month = int(date_string_split[1])
-        return self.month_fit[month]
+        date = np.datetime64(inp, "D")
+
+        date_range = pd.date_range(date, periods=6, freq="M")
+
+        out = [self.month_fit[int(np.datetime64(date, "D").astype(str).split("-")[1])] for date in date_range]
+
+        return out
 
 
 def predict_dataset(
@@ -96,11 +102,11 @@ def main(args: argparse.Namespace) -> None:
     dataset = data.RiverFlowDataset(
                 root=processed_path,
                 process=True,
-                lag=6, freq="M"
+                freq="M"
             )
 
     # Split dataset into training, validation and test
-    train, val, test = data.split_dataset(dataset, freq="M", lag=6,
+    train, val, test = data.split_dataset(dataset, {},
                                           val_year_min=1999,
                                           val_year_max=2004,
                                           test_year_min=1974,
@@ -118,22 +124,52 @@ def main(args: argparse.Namespace) -> None:
 
     model.fit()
 
-    inputs, predictions, values = predict_dataset(model, test)
+    save_dir = os.path.join("..", "experiments", "heuristics", args.model)
+    os.makedirs(save_dir, exist_ok=True)
 
-    index = list(test.data_date_dict.keys())
+    summer_rmse = evaluate_preds(model, True, val, test)
+    rmse = evaluate_preds(model, False, val, test)
 
-    df_results = utils.format_predictions(inputs, predictions, values, index)
+    with open(os.path.join(save_dir, "summer-rmse.npy"), "wb") as f:
+        np.save(f, summer_rmse)
 
-    results_metrics = utils.calculate_metrics(df_results)
+    with open(os.path.join(save_dir, "rmse.npy"), "wb") as f:
+        np.save(f, rmse)
 
-    print("Metrics of predicted values:")
+def evaluate_preds(
+    model: Union[AverageMonthPredictor, PreviousMonthPredictor],
+    summer: bool, *datasets: data.RiverFlowDataset
+) -> Any:
 
-    for key, val in results_metrics.items():
-        print(f"{key.upper()}: {val:.3f}")
+    new_dataset = data.RiverFlowDataset()
 
-    if args.plot:
-        plotting.plot_predictions(df_results)
-        plotting.plot_ind_predictions(df_results)
+    for dataset in datasets:
+        for date, value in dataset.data_date_dict.items():
+
+            if summer:
+                # Third month is split between winter and summer
+                if int(date.astype(str).split("-")[1]) == 8:
+                    new_dataset.set_data(date, value)
+            else:
+                new_dataset.set_data(date, value)
+
+    targets, predictions = [], []
+
+    for date in new_dataset.data_date_dict:
+
+        _, target = new_dataset.get_item_by_date(date)
+        out = model.predict(date)
+
+        targets.append(target.cpu().numpy())
+        predictions.append(np.array(out).reshape((-1, 6)))
+
+    targets = np.array(targets)
+    predictions = np.array(predictions)
+
+    squared_error = ((targets - predictions) ** 2).mean(axis=(0, 1))
+    rmse = np.sqrt(squared_error)
+
+    return rmse
 
 
 if __name__ == "__main__":
@@ -143,8 +179,6 @@ if __name__ == "__main__":
     parser.add_argument("--model", default="PreviousMonth", type=str,
                         help="Baseline to analyze",
                         choices=["PreviousMonth", "AverageMonth"])
-    parser.add_argument("--plot", action="store_true",
-                        help="Plot?")
 
     args = parser.parse_args()
 
