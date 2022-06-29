@@ -232,11 +232,12 @@ class GraphFlowDataset(Dataset):
             "standard"
         )
 
-        sub_in_msr, _ = load_edges_csv(
-            join(self.root, "graph", self.graph_type,
-                 "subsub-in-measurement.csv"),
-            "standard"
-        )
+        if self.graph_type != "homogeneous":
+            sub_in_msr, _ = load_edges_csv(
+                join(self.root, "graph", self.graph_type,
+                     "subsub-in-measurement.csv"),
+                "standard"
+            )
 
         # Repeat static measuremnts in the temporal dimension as they do not
         # change, these are flattened in case the dataset is not sequential.
@@ -255,7 +256,9 @@ class GraphFlowDataset(Dataset):
             # not simple
             msr_flows_msr = msr_flows_msr.repeat(self.lag, 1, 1)
             sub_flows_sub = sub_flows_sub.repeat(self.lag, 1, 1)
-            sub_in_msr = sub_in_msr.repeat(self.lag, 1, 1)
+
+            if self.graph_type != "homogeneous":
+                sub_in_msr = sub_in_msr.repeat(self.lag, 1, 1)
 
         self.scaler = get_scaler(self.scaler_name)
 
@@ -362,6 +365,7 @@ class GraphFlowDataset(Dataset):
                 date_targets = date_targets.reshape((4, -1, 4)).mean(dim=2)
 
             if self.sequential:
+
                 # Mapping defines our graph
                 mapping = {
                     ("measurement", "flows", "measurement"): {
@@ -370,15 +374,17 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_indices": sub_flows_sub
                     },
-                    ("subsub", "in", "measurement"): {
-                        "edge_indices": sub_in_msr
-                    },
                     "measurement": {
                         "xs": msr_features.float(),
                         "y": date_targets.float()
                     },
                     "subsub": {"xs": subsub_features.float()}
                 }
+
+                if self.graph_type != "homogeneous":
+                    mapping[("subsub", "in", "measurement")] = {
+                        "edge_indices": sub_in_msr
+                    }
 
                 data = HeteroSeqData(mapping, self.lag)
             else:
@@ -389,15 +395,17 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_index": sub_flows_sub
                     },
-                    ("subsub", "in", "measurement"): {
-                        "edge_index": sub_in_msr
-                    },
                     "measurement": {
                         "x": msr_features.float(),
                         "y": date_targets.float()
                     },
                     "subsub": {"x": subsub_features.float()}
                 }
+
+                if self.graph_type != "homogeneous":
+                    mapping[("subsub", "in", "measurement")] = {
+                        "edge_index": sub_in_msr
+                    }
 
                 data = HeteroData(mapping)
 
@@ -411,12 +419,13 @@ class GraphFlowDataset(Dataset):
         """
         self.data_date_dict[date] = value
 
-    def get_item_by_date(self, date: np.datetime64) -> HeteroData:
+    def get_item_by_date(self, date: Union[str, np.datetime64]) -> HeteroData:
         """
         class function: get_item_by_date
 
         Returns graph based on the date provided
         """
+        date = np.datetime64(date)
         return self.data_date_dict[date]
 
     @property
