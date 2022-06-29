@@ -89,7 +89,7 @@ def train(cfg: DictConfig) -> None:
     trainer.fit(model, train_loader, val_loader)
     trainer.test(model, test_loader)
 
-    if cfg.run.log.wandb:
+    if cfg.run.log and cfg.run.log.wandb:
         wandb.finish(quiet=True)
 
 

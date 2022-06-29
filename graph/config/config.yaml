@@ -1,6 +1,7 @@
 defaults:
   - _self_
   - optimizer: adam
+  - model: SeqGRU
   - override hydra/hydra_logging: disabled  
   - override hydra/job_logging: disabled  
 
@@ -8,11 +9,6 @@ hydra:
   output_subdir: null
   run:
     dir: .
-
-model:
-  name: SeqGRU
-  out_channels: 32
-  num_layers: 1
 
 run:
   log:
