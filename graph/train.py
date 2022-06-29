@@ -7,6 +7,9 @@ from pytorch_lightning.callbacks.early_stopping import EarlyStopping
 from pytorch_lightning.callbacks import LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.loggers import TensorBoardLogger
+import numpy as np
+
+from sklearn.metrics import mean_squared_error, r2_score
 
 import wandb
 import hydra
@@ -17,6 +20,7 @@ import os
 
 import models
 import data
+import utils
 
 from typing import List, Any, Union
 
@@ -87,10 +91,33 @@ def train(cfg: DictConfig) -> None:
                          log_every_n_steps=1)
 
     trainer.fit(model, train_loader, val_loader)
-    trainer.test(model, test_loader)
 
     if cfg.run.log.wandb:
         wandb.finish(quiet=True)
+
+    # Save run in case config indicates it
+    if cfg.run.save:
+        final_val_rmse = trainer.logged_metrics["val_rmse"].item()
+        save_dir = os.path.join(
+            "..", "experiments", "graph", (
+                cfg.model.name + "-" +
+                str(int(cfg.data.ndsi.index)) + str(int(cfg.data.ndsi.surface)) +
+                str(int(cfg.data.ndsi.cloud)) + str(int(cfg.data.ndvi.index)) +
+                str(int(cfg.data.ndvi.surface)) + str(int(cfg.data.ndvi.cloud))
+            )
+        )
+        os.makedirs(save_dir, exist_ok=True)
+
+        summer_rmse = evaluate_preds(model, True, val, test)
+        rmse = evaluate_preds(model, False, val, test)
+
+        trainer.save_checkpoint(os.path.join(save_dir, "model.ckpt"))
+
+        with open(os.path.join(save_dir, "summer-rmse.npy"), "wb") as f:
+            np.save(f, summer_rmse)
+
+        with open(os.path.join(save_dir, "rmse.npy"), "wb") as f:
+            np.save(f, rmse)
 
 
 def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
@@ -116,6 +143,32 @@ def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
         logger = False
 
     return logger
+
+
+def evaluate_preds(
+    model: nn.Module, summer: bool, *datasets: data.GraphFlowDataset
+) -> Any:
+
+    new_dataset = data.GraphFlowDataset()
+
+    for dataset in datasets:
+        for date, value in dataset.data_date_dict.items():
+
+            if summer:
+                # Third month is split between winter and summer
+                if int(date.astype(str).split("-")[1]) == 8:
+                    new_dataset.set_data(date, value)
+            else:
+                new_dataset.set_data(date, value)
+
+    loader = DataLoader(new_dataset, batch_size=1, num_workers=8)
+
+    targets, predictions = utils.predict(model, loader)
+
+    squared_error = ((targets - predictions) ** 2).mean(axis=(0, 1))
+    rmse = np.sqrt(squared_error)
+
+    return rmse
 
 
 if __name__ == "__main__":

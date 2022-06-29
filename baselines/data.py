@@ -72,6 +72,9 @@ class RiverFlowDataset(Dataset[Any]):
 
         self.time_features = time_features
 
+        self.ndsi_features = False
+        self.ndvi_features = False
+
         if ndsi is not None:
             # If any of the features are used store that in boolean
             self.ndsi_features = ndsi.index or ndsi.surface or ndsi.cloud
@@ -280,13 +283,12 @@ def split_dataset(
     test_year_min: int = 2013, test_year_max: int = 2019
 ) -> Tuple[RiverFlowDataset, RiverFlowDataset, RiverFlowDataset]:
 
-    assert cfg.freq in ["W", "M"]
     assert val_year_min < val_year_max
     assert test_year_min < test_year_max
 
-    if cfg.freq == "M":
+    if dataset.freq == "M":
         offset = pd.tseries.offsets.DateOffset(months=dataset.lag)
-    if cfg.freq == "W":
+    if dataset.freq == "W":
         offset = pd.tseries.offsets.DateOffset(weeks=dataset.lag)
 
     train_dataset = RiverFlowDataset(**cfg)
