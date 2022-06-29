@@ -20,6 +20,7 @@ run:
       entity: DanielPerezJensen
       offline: True
   plotting: False
+  save: False
 
 training:
   seeds: [42]

@@ -35,7 +35,8 @@ import data
 import plotting
 import utils
 
-from typing import Union, List, Optional
+import numpy.typing as npt
+from typing import Union, List, Optional, Any
 
 LoggerType = Union[Union[WandbLogger, TensorBoardLogger], bool]
 
@@ -102,15 +103,29 @@ def train(cfg: DictConfig) -> None:
         if cfg.run.log and cfg.run.log.wandb:
             wandb.finish(quiet=True)
 
-        inputs, targets, predictions = utils.predict(model, test_loader)
-        index = list(test.data_date_dict.keys())
-        df_results = utils.format_predictions(inputs, targets,
-                                              predictions, index)
+        # Save run in case config indicates it
+        if cfg.run.save:
+            final_val_rmse = trainer.logged_metrics["val_rmse"].item()
+            save_dir = os.path.join(
+                "..", "experiments", "baselines", (
+                    cfg.model.name + "-" +
+                    str(int(cfg.data.ndsi.index)) + str(int(cfg.data.ndsi.surface)) +
+                    str(int(cfg.data.ndsi.cloud)) + str(int(cfg.data.ndvi.index)) +
+                    str(int(cfg.data.ndvi.surface)) + str(int(cfg.data.ndvi.cloud))
+                )
+            )
+            os.makedirs(save_dir, exist_ok=True)
 
-        if cfg.run.plotting:
-            plotting.plot_ind_predictions(df_results)
+            summer_rmse = evaluate_preds(model, True, val, test)
+            rmse = evaluate_preds(model, False, val, test)
 
-        evaluate_summer_preds(model, test, val)
+            trainer.save_checkpoint(os.path.join(save_dir, "model.ckpt"))
+
+            with open(os.path.join(save_dir, "summer-rmse.npy"), "wb") as f:
+                np.save(f, summer_rmse)
+
+            with open(os.path.join(save_dir, "rmse.npy"), "wb") as f:
+                np.save(f, rmse)
 
 
 def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
@@ -138,33 +153,30 @@ def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
     return logger
 
 
-def evaluate_summer_preds(
-    model: nn.Module, *datasets: data.RiverFlowDataset
-) -> None:
+def evaluate_preds(
+    model: nn.Module, summer: bool, *datasets: data.RiverFlowDataset
+) -> Any:
 
-    summer_dataset = data.RiverFlowDataset()
+    new_dataset = data.RiverFlowDataset()
 
     for dataset in datasets:
+        for date, value in dataset.data_date_dict.items():
 
-        if dataset.freq == "M":
-            for date, value in dataset.data_date_dict.items():
+            if summer:
                 # Third month is split between winter and summer
                 if int(date.astype(str).split("-")[1]) == 8:
-                    summer_dataset.set_data(date, value)
+                    new_dataset.set_data(date, value)
+            else:
+                new_dataset.set_data(date, value)
 
-        elif dataset.freq == "W":
-            for date, value in dataset.data_date_dict.items():
-                if int(date.astype(str).split("-")[1]) == 8:
-                    summer_dataset.set_data(date, value)
+    loader = DataLoader(new_dataset, batch_size=1, num_workers=8)
 
-    loader = DataLoader(summer_dataset, batch_size=1, num_workers=8)
+    targets, predictions = utils.predict(model, loader)
 
-    inputs, targets, predictions = utils.predict(model, loader)
+    squared_error = ((targets - predictions) ** 2).mean(axis=(0, 1))
+    rmse = np.sqrt(squared_error)
 
-    rmse = mean_squared_error(targets, predictions,
-                              squared=False, multioutput="raw_values")
-
-    print(rmse)
+    return rmse
 
 
 if __name__ == "__main__":

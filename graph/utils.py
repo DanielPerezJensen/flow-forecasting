@@ -36,14 +36,11 @@ def predict(
     values = []
 
     for i, data in enumerate(test_loader):
-        inp, targets = data
 
-        if model.cfg.model.name in ["GRU", "LSTM"]:
-            inp = inp.view([1, -1, model.input_dim])
+        inp = data.to(model.device)
+        targets = inp["measurement"].y
 
-        inp = inp.to(model.device)
-        targets = targets.to(model.device)
-        outputs = model(inp)
+        outputs = model(inp.xs_dict, inp.edge_indices_dict)
 
         predictions.append(
             scaler.inverse_transform(outputs.detach().cpu().numpy().reshape((-1, targets.size(2))))

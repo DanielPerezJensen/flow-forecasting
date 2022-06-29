@@ -19,6 +19,7 @@ run:
       project: baselines
       entity: DanielPerezJensen
       offline: True
+  save: False
 
 training:
   gpu: 0
