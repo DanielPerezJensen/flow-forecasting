@@ -600,9 +600,7 @@ def aggregate_area_data(
         freq_aggr = grouped_df.resample("D").ffill()[[column]]
         freq_aggr = freq_aggr.groupby(pd.Grouper(freq=freq))[[column]].mean()
     else:
-        freq_aggr = grouped_df.groupby(
-            pd.Grouper(key='date', freq=freq)
-        ).mean()
+        freq_aggr = grouped_df.groupby(pd.Grouper(freq=freq)).mean()
 
     freq_aggr = freq_aggr.reset_index()
     freq_aggr = freq_aggr.rename({column: f"{name}_{column}"},
