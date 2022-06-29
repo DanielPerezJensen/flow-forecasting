@@ -1,0 +1,8 @@
+name: SeqGRU
+hidden_dim: 128
+num_layers: 1
+convolution:
+  name: sage
+  out_channels: 32
+  heads: 1
+  dropout_prob: 0.1

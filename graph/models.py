@@ -21,83 +21,14 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
                    MaxAbsScaler, RobustScaler, FunctionTransformer]
 
 
-class HeteroSeqLSTM(pl.LightningModule):
-    def __init__(
-        self,
-        cfg: DictConfig,
-        metadata: Tuple[List[str], List[Tuple[str, str, str]]],
-        scaler: ScalerType,
-    ) -> None:
-
+class BaseModel(pl.LightningModule):
+    def __init__(self, cfg, metadata, scaler):
         super().__init__()
 
         self.cfg = cfg
         self.metadata = metadata
         self.scaler = scaler
 
-        self.convs = nn.ModuleList()
-
-        for _ in range(cfg.model.num_layers):
-            conv = geom_nn.HeteroConv({
-                edge_type: geom_nn.SAGEConv(
-                    in_channels=(-1, -1), out_channels=cfg.model.out_channels
-                )
-                for edge_type in metadata[1]
-            })
-
-            self.convs.append(conv)
-
-        # The lag is dictated by the data frequency
-        if cfg.data.freq == "M":
-            self.lag = 6
-        elif cfg.data.freq == "W":
-            self.lag = 24
-
-        self.gru = nn.GRU(cfg.model.out_channels, 64, batch_first=True)
-        self.linear = nn.Linear(64, 6)
-
-        self.loss_fn = nn.MSELoss()
-
-    def forward(
-        self, x_dict: TensorDict, edge_index_dict: TensorDict
-    ) -> torch.Tensor:
-        batch_size = x_dict["measurement"].size(0)
-
-        for node_type in x_dict:
-            x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
-
-        for edge_type in edge_index_dict:
-            edge_index_dict[edge_type] = edge_index_dict[
-                edge_type
-            ].permute((0, 2, 1)).flatten(0, 1).T
-
-        for conv in self.convs:
-            conv_out = conv(x_dict, edge_index_dict)
-
-        msr_out = conv_out["measurement"]
-
-        # Reshape to [batch_size, lag, n_stations, dimension]
-        msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
-        # Reshape to [batch_size, n_stations, lag, dimension]
-        msr_out = msr_out.permute((0, 2, 1, 3))
-        # Flatten into [batch_size * n_stations, lag, dimension]
-        msr_out = msr_out.flatten(0, 1)
-
-        gru_out, _ = self.gru(msr_out)
-        gru_out = gru_out[:, -1, :]
-        gru_out = gru_out.reshape((batch_size, 4, -1))
-        lin_out = self.linear(gru_out)  # type: torch.Tensor
-
-        return lin_out
-
-    def configure_optimizers(
-        self
-    ) -> Tuple[torch.optim.Optimizer, torch.optim.Optimizer]:
-        optimizer = get_optimizer(self.cfg.optimizer.name)
-        self.optimizer = optimizer(self.parameters(),
-                                   **self.cfg.optimizer.hparams)
-
-        return self.optimizer
 
     def training_step(
         self, batch: Batch, batch_idx: int
@@ -136,6 +67,7 @@ class HeteroSeqLSTM(pl.LightningModule):
             eval_dict[f"train_{k}"] = eval_dict.pop(k)
 
         self.log_dict(eval_dict, on_epoch=True, prog_bar=True)
+
     def validation_epoch_end(
         self, validation_step_outputs
     ) -> None:
@@ -188,6 +120,244 @@ class HeteroSeqLSTM(pl.LightningModule):
         eval_dict = get_evaluation_measures(descaled_outputs, descaled_targets)
 
         return eval_dict
+
+
+class HeteroSeqLSTM(BaseModel):
+    def __init__(
+        self,
+        cfg: DictConfig,
+        metadata: Tuple[List[str], List[Tuple[str, str, str]]],
+        scaler: ScalerType,
+    ) -> None:
+
+        super().__init__(cfg, metadata, scaler)
+
+        self.cfg = cfg
+        self.metadata = metadata
+        self.scaler = scaler
+
+        self.convs = nn.ModuleList()
+
+        # Convolutions dictated by config
+        if self.cfg.model.convolution.name == "sage":
+            for _ in range(cfg.model.num_layers):
+                conv = geom_nn.HeteroConv({
+                    edge_type: geom_nn.SAGEConv(
+                        in_channels=(-1, -1),
+                        out_channels=cfg.model.convolution.out_channels
+                    )
+                    for edge_type in metadata[1]
+                })
+
+                self.convs.append(conv)
+
+        elif self.cfg.model.convolution.name == "gat":
+            for _ in range(cfg.model.num_layers):
+                conv = geom_nn.HeteroConv({
+                    edge_type: geom_nn.GATv2Conv(
+                        in_channels=(-1, -1),
+                        out_channels=cfg.model.convolution.out_channels,
+                        heads=cfg.model.convolution.heads,
+                        dropout=cfg.model.convolution.dropout_prob,
+                    )
+                    for edge_type in metadata[1]
+                })
+
+                self.convs.append(conv)
+
+        # Layer Norm for each node type
+        self.conv_normalizations = nn.ModuleDict(
+            {node: geom_nn.LayerNorm(cfg.model.convolution.out_channels)
+                for node in metadata[0]}
+        )
+
+        # The lag is dictated by the data frequency
+        if cfg.data.freq == "M":
+            self.lag = 6
+        elif cfg.data.freq == "W":
+            self.lag = 24
+
+        self.gru = nn.GRU(
+            cfg.model.convolution.out_channels, cfg.model.hidden_dim,
+            batch_first=True
+        )
+
+        # Layer norm for output of GRU
+        self.layer_norm = nn.LayerNorm(cfg.model.hidden_dim)
+
+        self.linear = nn.Linear(cfg.model.hidden_dim, 6)
+
+        self.loss_fn = nn.MSELoss()
+
+    def forward(
+        self, x_dict: TensorDict, edge_index_dict: TensorDict
+    ) -> torch.Tensor:
+        batch_size = x_dict["measurement"].size(0)
+
+        # [B, T, N, D] -> [B x T x N, D]
+        for node_type in x_dict:
+            x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
+
+        # Format edges to expected format of -> [2, M]
+        for edge_type in edge_index_dict:
+            edge_index_dict[edge_type] = edge_index_dict[
+                edge_type
+            ].permute((0, 2, 1)).flatten(0, 1).T
+
+        # Apply message passing
+        for conv in self.convs:
+            conv_out = conv(x_dict, edge_index_dict)
+
+        # Normalize output of message passing
+        for node_type, out in conv_out.items():
+            conv_out[node_type] = self.conv_normalizations[node_type](out)
+
+        # Take out measurement nodes and reshape to proper output
+        msr_out = conv_out["measurement"]
+
+        # Reshape to [batch_size, lag, n_stations, dimension]
+        msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
+        # Reshape to [batch_size, n_stations, lag, dimension]
+        msr_out = msr_out.permute((0, 2, 1, 3))
+        # Flatten into [batch_size * n_stations, lag, dimension]
+        msr_out = msr_out.flatten(0, 1)
+
+        gru_out, _ = self.gru(msr_out)
+
+        # Normalize output of GRU
+        gru_out = self.layer_norm(gru_out)
+
+        gru_out = gru_out[:, -1, :]
+        gru_out = gru_out.reshape((batch_size, 4, -1))
+        lin_out = self.linear(gru_out)  # type: torch.Tensor
+
+        return lin_out
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = get_optimizer(self.cfg.optimizer.name)
+        self.optimizer = optimizer(self.parameters(),
+                                   **self.cfg.optimizer.hparams)
+
+        return self.optimizer
+
+
+class HeteroSeqLSTM(BaseModel):
+    def __init__(
+        self,
+        cfg: DictConfig,
+        metadata: Tuple[List[str], List[Tuple[str, str, str]]],
+        scaler: ScalerType,
+    ) -> None:
+
+        super().__init__(cfg, metadata, scaler)
+
+        self.cfg = cfg
+        self.metadata = metadata
+        self.scaler = scaler
+
+        self.convs = nn.ModuleList()
+
+        # Convolutions dictated by config
+        if self.cfg.model.convolution.name == "sage":
+            for _ in range(cfg.model.num_layers):
+                conv = geom_nn.HeteroConv({
+                    edge_type: geom_nn.SAGEConv(
+                        in_channels=(-1, -1),
+                        out_channels=cfg.model.convolution.out_channels
+                    )
+                    for edge_type in metadata[1]
+                })
+
+                self.convs.append(conv)
+
+        elif self.cfg.model.convolution.name == "gat":
+            for _ in range(cfg.model.num_layers):
+                conv = geom_nn.HeteroConv({
+                    edge_type: geom_nn.GATv2Conv(
+                        in_channels=(-1, -1),
+                        out_channels=cfg.model.convolution.out_channels,
+                        heads=cfg.model.convolution.heads,
+                        dropout=cfg.model.convolution.dropout_prob,
+                    )
+                    for edge_type in metadata[1]
+                })
+
+                self.convs.append(conv)
+
+        # Layer Norm for each node type
+        self.conv_normalizations = nn.ModuleDict(
+            {node: geom_nn.LayerNorm(cfg.model.convolution.out_channels)
+                for node in metadata[0]}
+        )
+
+        # The lag is dictated by the data frequency
+        if cfg.data.freq == "M":
+            self.lag = 6
+        elif cfg.data.freq == "W":
+            self.lag = 24
+
+        self.gru = nn.GRU(
+            cfg.model.convolution.out_channels, cfg.model.hidden_dim,
+            batch_first=True
+        )
+
+        # Layer norm for output of GRU
+        self.layer_norm = nn.LayerNorm(cfg.model.hidden_dim)
+
+        self.linear = nn.Linear(cfg.model.hidden_dim, 6)
+
+        self.loss_fn = nn.MSELoss()
+
+    def forward(
+        self, x_dict: TensorDict, edge_index_dict: TensorDict
+    ) -> torch.Tensor:
+        batch_size = x_dict["measurement"].size(0)
+
+        # [B, T, N, D] -> [B x T x N, D]
+        for node_type in x_dict:
+            x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
+
+        # Format edges to expected format of -> [2, M]
+        for edge_type in edge_index_dict:
+            edge_index_dict[edge_type] = edge_index_dict[
+                edge_type
+            ].permute((0, 2, 1)).flatten(0, 1).T
+
+        # Apply message passing
+        for conv in self.convs:
+            conv_out = conv(x_dict, edge_index_dict)
+
+        # Normalize output of message passing
+        for node_type, out in conv_out.items():
+            conv_out[node_type] = self.conv_normalizations[node_type](out)
+
+        # Take out measurement nodes and reshape to proper output
+        msr_out = conv_out["measurement"]
+
+        # Reshape to [batch_size, lag, n_stations, dimension]
+        msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
+        # Reshape to [batch_size, n_stations, lag, dimension]
+        msr_out = msr_out.permute((0, 2, 1, 3))
+        # Flatten into [batch_size * n_stations, lag, dimension]
+        msr_out = msr_out.flatten(0, 1)
+
+        gru_out, _ = self.gru(msr_out)
+
+        # Normalize output of GRU
+        gru_out = self.layer_norm(gru_out)
+
+        gru_out = gru_out[:, -1, :]
+        gru_out = gru_out.reshape((batch_size, 4, -1))
+        lin_out = self.linear(gru_out)  # type: torch.Tensor
+
+        return lin_out
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        optimizer = get_optimizer(self.cfg.optimizer.name)
+        self.optimizer = optimizer(self.parameters(),
+                                   **self.cfg.optimizer.hparams)
+
+        return self.optimizer
 
 
 def get_evaluation_measures(
