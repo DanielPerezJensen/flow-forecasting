@@ -31,6 +31,8 @@ torch-geometric = "*"
 mypy = "==0.950"
 hydra-core = "==1.1.2"
 torchmetrics = "==0.8.2"
+kaleido = "*"
+SciencePlots = "*"
 
 [dev-packages]
 
