@@ -284,9 +284,17 @@ class HeteroSeqLSTM(BaseModel):
 
                 self.convs.append(conv)
 
+        if self.cfg.model.convolution.name == "sage":
+            out_channels = cfg.model.convolution.out_channels
+        elif self.cfg.model.convolution.name == "gat":
+            out_channels = (
+                cfg.model.convolution.out_channels *
+                cfg.model.convolution.heads
+            )
+
         # Layer Norm for each node type
         self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.LayerNorm(cfg.model.convolution.out_channels)
+            {node: geom_nn.LayerNorm(out_channels)
                 for node in metadata[0]}
         )
 
@@ -297,7 +305,7 @@ class HeteroSeqLSTM(BaseModel):
             self.lag = 24
 
         self.gru = nn.GRU(
-            cfg.model.convolution.out_channels, cfg.model.hidden_dim,
+            out_channels, cfg.model.hidden_dim,
             batch_first=True
         )
 
