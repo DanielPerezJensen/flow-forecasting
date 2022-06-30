@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - optimizer: adam
-  - model: SeqGRU
+  - model: HeteroSeqGRU
   - override hydra/hydra_logging: disabled  
   - override hydra/job_logging: disabled  
 
