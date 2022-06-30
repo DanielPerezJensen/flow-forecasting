@@ -1,7 +1,7 @@
-name: SeqGRU
+name: HeteroSeqGRU
 hidden_dim: 128
-num_layers: 1
 convolution:
+  num_layers: 1
   name: sage
   out_channels: 32
   heads: 1

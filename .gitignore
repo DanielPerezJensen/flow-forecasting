@@ -131,3 +131,5 @@ dmypy.json
 wandb
 lightning_logs
 checkpoints
+experiments
+sweeps/

@@ -33,6 +33,7 @@ hydra-core = "==1.1.2"
 torchmetrics = "==0.8.2"
 kaleido = "*"
 SciencePlots = "*"
+class-resolver = "*"
 
 [dev-packages]
 
