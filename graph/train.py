@@ -71,7 +71,9 @@ def train(cfg: DictConfig) -> None:
     scaler = dataset.scaler
 
     if cfg.data.sequential:
-        model = models.HeteroSeqLSTM(cfg, metadata, scaler)
+        model = models.HeteroSeqGRU(cfg, metadata, scaler)
+    else:
+        model = models.HeteroMLP(cfg, metadata, scaler)
 
     # Dummy pass to initialize all layers
     with torch.no_grad():

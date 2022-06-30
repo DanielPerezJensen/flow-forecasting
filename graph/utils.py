@@ -40,7 +40,12 @@ def predict(
         inp = data.to(model.device)
         targets = inp["measurement"].y
 
-        outputs = model(inp.xs_dict, inp.edge_indices_dict)
+        if model.cfg.data.sequential:
+            outputs = model(inp.xs_dict, inp.edge_indices_dict)
+        else:
+            outputs = model(inp.x_dict, inp.edge_index_dict)
+            outputs = outputs[None, :, :]
+            targets = targets[None, :, :]
 
         predictions.append(
             scaler.inverse_transform(outputs.detach().cpu().numpy().reshape((-1, targets.size(2))))
