@@ -1,7 +1,7 @@
 name: HeteroMLP
 hidden_dim: 128
 mlp_layers: 3
-mlp_dropout_prob: 0.4
+mlp_dropout_prob: 0
 convolution:
   name: sage
   num_layers: 1

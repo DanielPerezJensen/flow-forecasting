@@ -144,6 +144,8 @@ class HeteroMLP(BaseModel):
 
         # Convolutions dictated by config
         if self.cfg.model.convolution.name == "sage":
+            conv_out_dim = cfg.model.convolution.out_channels
+
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
                     edge_type: geom_nn.SAGEConv(
@@ -156,6 +158,10 @@ class HeteroMLP(BaseModel):
                 self.convs.append(conv)
 
         elif self.cfg.model.convolution.name == "gat":
+
+            conv_out_dim = (cfg.model.convolution.out_channels *
+                            cfg.model.convolution.n_heads)
+
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
                     edge_type: geom_nn.GATv2Conv(
@@ -233,6 +239,8 @@ class HeteroSeqGRU(BaseModel):
 
         # Convolutions dictated by config
         if self.cfg.model.convolution.name == "sage":
+            conv_out_dim = cfg.model.convolution.out_channels
+
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
                     edge_type: geom_nn.SAGEConv(
@@ -245,6 +253,10 @@ class HeteroSeqGRU(BaseModel):
                 self.convs.append(conv)
 
         elif self.cfg.model.convolution.name == "gat":
+
+            conv_out_dim = (cfg.model.convolution.out_channels *
+                            cfg.model.convolution.n_heads)
+
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
                     edge_type: geom_nn.GATv2Conv(
@@ -260,7 +272,9 @@ class HeteroSeqGRU(BaseModel):
 
         # Layer Norm for each node type
         self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.LayerNorm(cfg.model.convolution.out_channels)
+            {node: geom_nn.LayerNorm(
+
+            )
                 for node in metadata[0]}
         )
 
