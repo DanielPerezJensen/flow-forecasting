@@ -177,7 +177,7 @@ class HeteroMLP(BaseModel):
 
         # Layer Norm for each node type
         self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.LayerNorm(cfg.model.convolution.out_channels)
+            {node: geom_nn.LayerNorm(conv_out_dim)
                 for node in metadata[0]}
         )
 
@@ -272,9 +272,7 @@ class HeteroSeqGRU(BaseModel):
 
         # Layer Norm for each node type
         self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.LayerNorm(
-
-            )
+            {node: geom_nn.LayerNorm(conv_out_dim)
                 for node in metadata[0]}
         )
 
