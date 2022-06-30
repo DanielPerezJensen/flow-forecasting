@@ -29,7 +29,6 @@ class BaseModel(pl.LightningModule):
         self.metadata = metadata
         self.scaler = scaler
 
-
     def training_step(
         self, batch: Batch, batch_idx: int
     ) -> Dict[str, torch.Tensor]:
@@ -160,7 +159,7 @@ class HeteroMLP(BaseModel):
         elif self.cfg.model.convolution.name == "gat":
 
             conv_out_dim = (cfg.model.convolution.out_channels *
-                            cfg.model.convolution.n_heads)
+                            cfg.model.convolution.heads)
 
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
@@ -255,7 +254,7 @@ class HeteroSeqGRU(BaseModel):
         elif self.cfg.model.convolution.name == "gat":
 
             conv_out_dim = (cfg.model.convolution.out_channels *
-                            cfg.model.convolution.n_heads)
+                            cfg.model.convolution.heads)
 
             for _ in range(cfg.model.convolution.num_layers):
                 conv = geom_nn.HeteroConv({
