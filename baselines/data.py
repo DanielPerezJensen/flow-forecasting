@@ -24,6 +24,10 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
 BatchType = Tuple[torch.Tensor, torch.Tensor]
 DataDateDictType = Dict[np.datetime64, BatchType]
 
+torch.set_printoptions(precision=2, sci_mode=False)
+np.set_printoptions(suppress=True,
+   formatter={'float_kind':'{:0.2f}'.format})
+
 
 class RiverFlowDataset(Dataset[Any]):
     def __init__(
@@ -185,9 +189,16 @@ class RiverFlowDataset(Dataset[Any]):
                 :, df_stations_date.columns.str.fullmatch("river_flow-\\d+")
             ]
 
-            date_features = torch.from_numpy(
-                df_date_features.to_numpy(dtype=np.float32).T
+            # We flip because otherwise the order is in reverse
+            # [river_flow{t} > river_flow{t-6}] should be
+            # [river_flow{t-6 > river_flow{t}}
+            flow_features = date_features = torch.flip(
+                torch.from_numpy(
+                    df_date_features.to_numpy(dtype=np.float32).T
+                ), dims=(0,)
             )
+
+            date_features = flow_features
 
             if self.time_features:
                 df_time_features = df_stations_date.loc[
@@ -236,6 +247,10 @@ class RiverFlowDataset(Dataset[Any]):
             date_targets = torch.from_numpy(
                 df_targets_date.to_numpy(dtype="float32")
             )
+
+            last_river_measurement = flow_features[-1]
+
+            date_targets = date_targets - last_river_measurement[:, None]
 
             # We always want 6 predictions, so aggregate weekly into monthly
             if self.freq == "W":
