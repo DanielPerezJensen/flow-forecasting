@@ -282,7 +282,7 @@ class HeteroSeqGRU(BaseModel):
         elif cfg.data.freq == "W":
             self.lag = 24
 
-        self.gru = nn.GRU(
+        self.rnn = nn.LSTM(
             cfg.model.convolution.out_channels, cfg.model.hidden_dim,
             batch_first=True
         )
@@ -327,7 +327,7 @@ class HeteroSeqGRU(BaseModel):
         # Flatten into [batch_size * n_stations, lag, dimension]
         msr_out = msr_out.flatten(0, 1)
 
-        gru_out, _ = self.gru(msr_out)
+        gru_out, _ = self.rnn(msr_out)
 
         # Normalize output of GRU
         gru_out = self.layer_norm(gru_out)
