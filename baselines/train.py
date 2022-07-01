@@ -36,7 +36,7 @@ import plotting
 import utils
 
 import numpy.typing as npt
-from typing import Union, List, Optional, Any
+from typing import Union, List, Optional, Any, Tuple
 
 LoggerType = Union[Union[WandbLogger, TensorBoardLogger], bool]
 
@@ -44,7 +44,10 @@ LoggerType = Union[Union[WandbLogger, TensorBoardLogger], bool]
 @hydra.main(config_path="config", config_name="config")
 def train(cfg: DictConfig) -> None:
 
-    for seed in cfg.training.seeds:
+    summer_months_collection = []
+    all_months_collection = []
+
+    for seed in cfg.run.seeds:
 
         pl.seed_everything(seed, workers=True)
 
@@ -105,27 +108,31 @@ def train(cfg: DictConfig) -> None:
 
         # Save run in case config indicates it
         if cfg.run.save:
-            final_val_rmse = trainer.logged_metrics["val_rmse"].item()
-            save_dir = os.path.join(
-                "..", "experiments", "baselines", (
-                    cfg.model.name + "-" +
-                    str(int(cfg.data.ndsi.index)) + str(int(cfg.data.ndsi.surface)) +
-                    str(int(cfg.data.ndsi.cloud)) + str(int(cfg.data.ndvi.index)) +
-                    str(int(cfg.data.ndvi.surface)) + str(int(cfg.data.ndvi.cloud))
-                )
+            summer_trgs, summer_preds = gather_preds(model, True, val, test)
+            trgs, preds = gather_preds(model, False, val, test)
+
+            summer_months_collection.append(
+                np.stack((summer_trgs, summer_preds), axis=0)
             )
-            os.makedirs(save_dir, exist_ok=True)
+            all_months_collection.append(
+                np.stack((trgs, preds), axis=0)
+            )
 
-            summer_rmse = evaluate_preds(model, True, val, test)
-            rmse = evaluate_preds(model, False, val, test)
+    if cfg.run.save:
+        save_dir = os.path.join(
+            "..", "experiments", "baselines",
+            (cfg.model.name + "-" + cfg.run.name)
+        )
+        os.makedirs(save_dir, exist_ok=True)
 
-            trainer.save_checkpoint(os.path.join(save_dir, "model.ckpt"))
+        summer_months = np.stack(summer_months_collection, axis=0)
+        all_months = np.stack(all_months_collection, axis=0)
 
-            with open(os.path.join(save_dir, "summer-rmse.npy"), "wb") as f:
-                np.save(f, summer_rmse)
+        with open(os.path.join(save_dir, "summer.npy"), "wb") as f:
+            np.save(f, summer_months)
 
-            with open(os.path.join(save_dir, "rmse.npy"), "wb") as f:
-                np.save(f, rmse)
+        with open(os.path.join(save_dir, "all.npy"), "wb") as f:
+            np.save(f, all_months)
 
 
 def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
@@ -153,15 +160,14 @@ def set_logger(model: nn.Module, cfg: DictConfig) -> LoggerType:
     return logger
 
 
-def evaluate_preds(
+def gather_preds(
     model: nn.Module, summer: bool, *datasets: data.RiverFlowDataset
-) -> Any:
+) -> Tuple[npt.NDArray[float], npt.NDArray[float]]:
 
     new_dataset = data.RiverFlowDataset()
 
     for dataset in datasets:
         for date, value in dataset.data_date_dict.items():
-
             if summer:
                 # Third month is split between winter and summer
                 if int(date.astype(str).split("-")[1]) == 8:
@@ -173,10 +179,7 @@ def evaluate_preds(
 
     targets, predictions = utils.predict(model, loader)
 
-    squared_error = ((targets - predictions) ** 2).mean(axis=(0, 1))
-    rmse = np.sqrt(squared_error)
-
-    return rmse
+    return targets, predictions
 
 
 if __name__ == "__main__":
