@@ -39,22 +39,22 @@ def train(cfg: DictConfig) -> None:
     summer_months_collection = []
     all_months_collection = []
 
+    processed_path = os.path.join(get_original_cwd(), "data", "processed")
+    dataset = data.GraphFlowDataset(
+                root=processed_path,
+                process=True,
+                **cfg.data
+            )
+
+    # Split dataset into training, validation and test
+    train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
+                                          val_year_min=1999,
+                                          val_year_max=2004,
+                                          test_year_min=1974,
+                                          test_year_max=1981)
+
     for seed in cfg.run.seeds:
         pl.seed_everything(seed, workers=True)
-
-        processed_path = os.path.join(get_original_cwd(), "data", "processed")
-        dataset = data.GraphFlowDataset(
-                    root=processed_path,
-                    process=True,
-                    **cfg.data
-                )
-
-        # Split dataset into training, validation and test
-        train, val, test = data.split_dataset(dataset, freq=cfg.data.freq,
-                                              val_year_min=1999,
-                                              val_year_max=2004,
-                                              test_year_min=1974,
-                                              test_year_max=1981)
 
         train_loader = DataLoader(
             train, batch_size=cfg.training.batch_size, num_workers=8, shuffle=True
@@ -74,10 +74,20 @@ def train(cfg: DictConfig) -> None:
         # scaler = train.scaler
         scaler = dataset.scaler
 
+        in_channels_dict = {}
+
         if cfg.data.sequential:
-            model = models.HeteroSeqGRU(cfg, metadata, scaler)
+            for key, value in data_sample.to_dict().items():
+                if isinstance(key, str) and isinstance(value, dict):
+                    in_channels_dict[key] = value["xs"].shape[-1]
+
+            model = models.HeteroSeqGRU(in_channels_dict, cfg, metadata, scaler)
         else:
-            model = models.HeteroMLP(cfg, metadata, scaler)
+            for key, value in data_sample.to_dict().items():
+                if isinstance(key, str):
+                    in_channels_dict[key] = value["x"].shape[-1]
+
+            model = models.HeteroMLP(in_channels_dict, cfg, metadata, scaler)
 
         # Dummy pass to initialize all layers
         with torch.no_grad():

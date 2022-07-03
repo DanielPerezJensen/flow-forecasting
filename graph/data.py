@@ -7,6 +7,7 @@ from os.path import join
 from datetime import timedelta
 from collections import OrderedDict
 from tqdm import tqdm
+import re
 
 import torch
 from torch_geometric.data import HeteroData, Dataset
@@ -106,6 +107,7 @@ class GraphFlowDataset(Dataset):
         freq: str = "M",
         sequential: bool = False,
         lagged_vars: Optional[List[str]] = None,
+        time_features: bool = True,
         ndsi: Optional[DictConfig] = None,
         ndvi: Optional[DictConfig] = None,
         process: bool = False
@@ -134,6 +136,8 @@ class GraphFlowDataset(Dataset):
 
         self.data_date_dict = OrderedDict()  # type: DataDateDictType
 
+        self.time_features = time_features
+
         if ndsi is not None:
             # If any of the features are used store that in boolean
             self.ndsi_features = ndsi.index or ndsi.surface or ndsi.cloud
@@ -159,6 +163,13 @@ class GraphFlowDataset(Dataset):
         """
         # Gather and lag flow data
         df_features = load_and_aggregate_flow_data(root, self.freq)
+
+        # Add time features if needed
+        if self.time_features:
+            df_features, self.lagged_vars = set_time_features(
+                self.freq, df_features, self.lagged_vars
+            )
+
         df_lagged = generate_lags(df_features, self.lagged_vars,
                                   self.lag, "station_number")
         df_lagged = generate_lags(df_lagged, [self.target_var],
@@ -232,12 +243,11 @@ class GraphFlowDataset(Dataset):
             "standard"
         )
 
-        if self.graph_type != "homogeneous":
-            sub_in_msr, _ = load_edges_csv(
-                join(self.root, "graph", self.graph_type,
-                     "subsub-in-measurement.csv"),
-                "standard"
-            )
+        sub_in_msr, _ = load_edges_csv(
+            join(self.root, "graph", self.graph_type,
+                 "subsub-in-measurement.csv"),
+            "standard"
+        )
 
         # Repeat static measuremnts in the temporal dimension as they do not
         # change, these are flattened in case the dataset is not sequential.
@@ -294,7 +304,37 @@ class GraphFlowDataset(Dataset):
             )
 
             # Extract flow as measurement features
-            date_flow_features = date_flow_features.T.reshape(self.lag, 4, 1)
+            date_flow_features = torch.flip(
+                date_flow_features, dims=(0,)
+            ).T.reshape(self.lag, 4, 1)
+
+            if self.time_features:
+                df_time_features = df_date.loc[
+                    :, df_date.columns.str.fullmatch(
+                        "((sin)|(cos))_.*\\d+"
+                    )
+                ]
+                # We sort the time features so we get
+                # [sin_24, cos_24, sin_23, cos_23, ..., sin_1, cos_1]
+                # [sin_1, cos_1, sin_2, cos_2, ..., sin_24, cos_24]
+                # regex there for more than one digit
+                df_time_features = df_time_features[
+                    sorted(df_time_features.columns,
+                           key=lambda x: int(re.search(r'\d+$', x).group()),
+                           reverse=True)
+                ]
+
+                # Only add one time feature as they are equal across stations
+                time_features = torch.from_numpy(
+                    df_time_features.to_numpy(dtype="float32")
+                )
+
+                time_features = time_features.reshape(4, self.lag, -1).permute((1, 0, 2))
+
+                date_flow_features = torch.cat(
+                    [time_features, date_flow_features], dim=2
+                )
+
             msr_features = torch.cat(
                 [measurements_feats, date_flow_features], dim=2
             )
@@ -314,6 +354,8 @@ class GraphFlowDataset(Dataset):
                     self.lag, n_subsubs, -1
                 )
 
+                date_NDSI_features = torch.flip(date_NDSI_features, dims=(0,))
+
                 subsub_features = torch.cat(
                     (subsub_features, date_NDSI_features), dim=2
                 )
@@ -329,6 +371,8 @@ class GraphFlowDataset(Dataset):
                 date_NDVI_features = date_NDVI_features.T.reshape(
                     self.lag, n_subsubs, -1
                 )
+
+                date_NDSI_features = torch.flip(date_NDSI_features, dims=(0,))
 
                 subsub_features = torch.cat(
                     (subsub_features, date_NDVI_features), dim=2
@@ -374,6 +418,9 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_indices": sub_flows_sub
                     },
+                    ("subsub", "in", "measurement"): {
+                        "edge_indices": sub_in_msr
+                    },
                     "measurement": {
                         "xs": msr_features.float(),
                         "y": date_targets.float()
@@ -381,10 +428,10 @@ class GraphFlowDataset(Dataset):
                     "subsub": {"xs": subsub_features.float()}
                 }
 
-                if self.graph_type != "homogeneous":
-                    mapping[("subsub", "in", "measurement")] = {
-                        "edge_indices": sub_in_msr
-                    }
+                if self.graph_type == "homogeneous":
+                    mapping.pop(("subsub", "flows", "subsub"))
+                    mapping.pop(("subsub", "in", "measurement"))
+                    mapping.pop("subsub")
 
                 data = HeteroSeqData(mapping, self.lag)
             else:
@@ -395,6 +442,9 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_index": sub_flows_sub
                     },
+                    ("subsub", "in", "measurements"): {
+                        "edge_index": sub_in_msr
+                    },
                     "measurement": {
                         "x": msr_features.float(),
                         "y": date_targets.float()
@@ -402,10 +452,10 @@ class GraphFlowDataset(Dataset):
                     "subsub": {"x": subsub_features.float()}
                 }
 
-                if self.graph_type != "homogeneous":
-                    mapping[("subsub", "in", "measurement")] = {
-                        "edge_index": sub_in_msr
-                    }
+                if self.graph_type == "homogeneous":
+                    mapping.pop(("subsub", "flows", "subsub"))
+                    mapping.pop(("subsub", "in", "measurement"))
+                    mapping.pop("subsub")
 
                 data = HeteroData(mapping)
 
@@ -650,6 +700,48 @@ def load_and_aggregate_flow_data(
     df_flow_aggregated = pd.concat(station_dfs)
 
     return df_flow_aggregated
+
+
+def set_time_features(
+    freq: str, df_features: pd.DataFrame, lagged_vars: List[str]
+) -> Tuple[pd.DataFrame, List[str]]:
+    if freq == "W":
+        df_features = (
+            df_features.assign(
+                month=df_features.date.dt.month,
+                week=df_features.date.dt.isocalendar().week)
+        )
+        df_features = generate_cyclical_features(df_features,
+                                                 "month", 12, 1)
+        df_features = generate_cyclical_features(df_features,
+                                                 "week", 52, 1)
+        lagged_vars += ["sin_month", "cos_month"]
+        lagged_vars += ["sin_week", "cos_week"]
+
+    elif freq == "M":
+        df_features = (
+            df_features.assign(
+                month=df_features.date.dt.month)
+        )
+        df_features = generate_cyclical_features(df_features,
+                                                 "month", 12, 1)
+        lagged_vars += ["sin_month", "cos_month"]
+
+    return df_features, lagged_vars
+
+
+def generate_cyclical_features(
+    df: pd.DataFrame, col_name: str, period: int, start_num: int = 0
+) -> pd.DataFrame:
+
+    kwargs = {
+        f"sin_{col_name}":
+            lambda x: np.sin(2 * np.pi * (df[col_name] - start_num) / period),
+        f"cos_{col_name}":
+            lambda x: np.cos(2 * np.pi * (df[col_name] - start_num) / period)
+    }
+
+    return df.assign(**kwargs).drop(columns=[col_name])
 
 
 def load_and_aggregate_ndsi_ndvi_data(

@@ -47,24 +47,26 @@ def train(cfg: DictConfig) -> None:
     summer_months_collection = []
     all_months_collection = []
 
+    processed_path = os.path.join(get_original_cwd(), "data", "processed")
+
+    dataset = data.RiverFlowDataset(
+                root=processed_path,
+                process=True,
+                **cfg.data
+            )
+
+    print(dataset.data_date_dict)
+
+    # Split dataset into training, validation and test
+    train, val, test = data.split_dataset(dataset, cfg.data,
+                                          val_year_min=1999,
+                                          val_year_max=2004,
+                                          test_year_min=1974,
+                                          test_year_max=1981)
+
     for seed in cfg.run.seeds:
 
         pl.seed_everything(seed, workers=True)
-
-        processed_path = os.path.join(get_original_cwd(), "data", "processed")
-
-        dataset = data.RiverFlowDataset(
-                    root=processed_path,
-                    process=True,
-                    **cfg.data
-                )
-
-        # Split dataset into training, validation and test
-        train, val, test = data.split_dataset(dataset, cfg.data,
-                                              val_year_min=1999,
-                                              val_year_max=2004,
-                                              test_year_min=1974,
-                                              test_year_max=1981)
 
         # Convert Datasets to Dataloader to allow for training
         batch_size = cfg.training.batch_size
