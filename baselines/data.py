@@ -185,9 +185,16 @@ class RiverFlowDataset(Dataset[Any]):
                 :, df_stations_date.columns.str.fullmatch("river_flow-\\d+")
             ]
 
-            date_features = torch.from_numpy(
-                df_date_features.to_numpy(dtype=np.float32).T
+            # We flip because otherwise the order is in reverse
+            # [river_flow{t} > river_flow{t-6}] should be
+            # [river_flow{t-6 > river_flow{t}}
+            flow_features = date_features = torch.flip(
+                torch.from_numpy(
+                    df_date_features.to_numpy(dtype=np.float32).T
+                ), dims=(0,)
             )
+
+            date_features = flow_features
 
             if self.time_features:
                 df_time_features = df_stations_date.loc[
@@ -196,11 +203,13 @@ class RiverFlowDataset(Dataset[Any]):
                     )
                 ]
                 # We sort the time features so we get
+                # [sin_24, cos_24, sin_23, cos_23, ..., sin_1, cos_1]
                 # [sin_1, cos_1, sin_2, cos_2, ..., sin_24, cos_24]
                 # regex there for more than one digit
                 df_time_features = df_time_features[
                     sorted(df_time_features.columns,
-                           key=lambda x: int(re.search(r'\d+$', x).group()))
+                           key=lambda x: int(re.search(r'\d+$', x).group()),
+                           reverse=True)
                 ]
 
                 # Only add one time feature as they are equal across stations
@@ -236,6 +245,8 @@ class RiverFlowDataset(Dataset[Any]):
             date_targets = torch.from_numpy(
                 df_targets_date.to_numpy(dtype="float32")
             )
+
+            last_river_measurement = flow_features[-1]
 
             # We always want 6 predictions, so aggregate weekly into monthly
             if self.freq == "W":
@@ -435,6 +446,8 @@ def append_ndsi_ndvi_features(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
 
+        feature = torch.flip(feature, dims=(0,))
+
         date_features = torch.cat((date_features, feature), dim=1)
 
     if surface:
@@ -447,6 +460,8 @@ def append_ndsi_ndvi_features(
         feature = torch.from_numpy(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
+
+        feature = torch.flip(feature, dims=(0,))
 
         date_features = torch.cat((date_features, feature), dim=1)
 
@@ -462,6 +477,8 @@ def append_ndsi_ndvi_features(
         feature = torch.from_numpy(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
+
+        feature = torch.flip(feature, dims=(0,))
 
         date_features = torch.cat((date_features, feature), dim=1)
 

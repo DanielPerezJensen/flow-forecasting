@@ -128,6 +128,7 @@ class BaseModel(pl.LightningModule):
         inputs, targets = batch
 
         outputs = self(inputs)
+
         outputs = outputs.view(
             -1, len(self.cfg.data.target_stations), self.output_dim
         )
@@ -139,14 +140,15 @@ class BaseModel(pl.LightningModule):
     def _shared_eval_epoch_end(
         self, step_outputs: List[Dict[str, torch.Tensor]]
     ) -> Dict[str, float]:
-        outputs, targets = [], []
+
+        outputs_list, targets_list = [], []
 
         for out in step_outputs:
-            outputs.append(out["outputs"])
-            targets.append(out["targets"])
+            outputs_list.append(out["outputs"].reshape(-1, len(self.cfg.data.target_stations)))
+            targets_list.append(out["targets"].reshape(-1, len(self.cfg.data.target_stations)))
 
-        np_outputs = np.squeeze(torch.cat(outputs).cpu().detach().numpy(), axis=1)
-        np_targets = np.squeeze(torch.cat(targets).cpu().detach().numpy(), axis=1)
+        np_outputs = torch.cat(outputs_list).detach().cpu().numpy()
+        np_targets = torch.cat(targets_list).detach().cpu().numpy()
 
         descaled_outputs = self.scaler.inverse_transform(np_outputs)
         descaled_targets = self.scaler.inverse_transform(np_targets)
@@ -182,7 +184,9 @@ class MLP(BaseModel):
                                          layer_sizes[layer_index]))
             self.layers.append(nn.ReLU())
 
-        self.layers.append(nn.Linear(layer_sizes[-1], output_dim))
+        self.layers.append(nn.Linear(
+            layer_sizes[-1], len(cfg.data.target_stations) * output_dim
+        ))
 
         # Typing of the sequential layers
         self.model: Callable[[torch.Tensor], torch.Tensor]
@@ -207,6 +211,7 @@ class GRU(BaseModel):
     ) -> None:
         super().__init__()
 
+        self.cfg = cfg
         # Defining the number of layers and the nodes in each layer
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -223,7 +228,9 @@ class GRU(BaseModel):
 
         # Typing option of fully connected output layer
         self.fc: Callable[[torch.Tensor], torch.Tensor]
-        self.fc = nn.Linear(cfg.model.hidden_dim, self.output_dim)
+        self.fc = nn.Linear(
+            cfg.model.hidden_dim, len(cfg.data.target_stations) * self.output_dim
+        )
 
         self.scaler = scaler
         self.cfg = cfg
@@ -264,6 +271,7 @@ class LSTM(BaseModel):
 
         super().__init__()
 
+        self.cfg = cfg
         # Defining the number of layers and the nodes in each layer
         self.input_dim = input_dim
         self.output_dim = output_dim
@@ -280,7 +288,9 @@ class LSTM(BaseModel):
 
         # Typing option of fully connected output layer
         self.fc: Callable[[torch.Tensor], torch.Tensor]
-        self.fc = nn.Linear(cfg.model.hidden_dim, output_dim)
+        self.fc = nn.Linear(
+            cfg.model.hidden_dim, len(cfg.data.target_stations) * output_dim
+        )
 
         self.scaler = scaler
         self.cfg = cfg

@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - optimizer: adam
-  - model: HeteroSeqGRU
+  - model: HeteroSeq
   - override hydra/hydra_logging: disabled  
   - override hydra/job_logging: disabled  
 
@@ -20,11 +20,13 @@ run:
       entity: DanielPerezJensen
       offline: True
   save: False
+  name: Base
+  seeds: [42]
 
 training:
-  gpu: 0
   epochs: 50
   batch_size: 256
+  gpu: 0
 
 data:
   scaler_name: none
@@ -32,6 +34,7 @@ data:
   freq: W
   sequential: True
   lagged_vars: [river_flow]
+  time_features: False
   ndsi:
     index: False
     surface: False

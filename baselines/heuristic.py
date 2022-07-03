@@ -127,16 +127,19 @@ def main(args: argparse.Namespace) -> None:
     save_dir = os.path.join("..", "experiments", "heuristics", args.model)
     os.makedirs(save_dir, exist_ok=True)
 
-    summer_rmse = evaluate_preds(model, True, val, test)
-    rmse = evaluate_preds(model, False, val, test)
+    summer_trgs, summer_preds = gather_preds(model, True, val, test)
+    trgs, preds = gather_preds(model, False, val, test)
 
-    with open(os.path.join(save_dir, "summer-rmse.npy"), "wb") as f:
-        np.save(f, summer_rmse)
+    summer_months = np.stack((summer_trgs, summer_preds), axis=0)[None]
+    all_months = np.stack((trgs, preds), axis=0)[None]
 
-    with open(os.path.join(save_dir, "rmse.npy"), "wb") as f:
-        np.save(f, rmse)
+    with open(os.path.join(save_dir, "summer.npy"), "wb") as f:
+        np.save(f, summer_months)
 
-def evaluate_preds(
+    with open(os.path.join(save_dir, "all.npy"), "wb") as f:
+        np.save(f, all_months)
+
+def gather_preds(
     model: Union[AverageMonthPredictor, PreviousMonthPredictor],
     summer: bool, *datasets: data.RiverFlowDataset
 ) -> Any:
@@ -166,10 +169,7 @@ def evaluate_preds(
     targets = np.array(targets)
     predictions = np.array(predictions)
 
-    squared_error = ((targets - predictions) ** 2).mean(axis=(0, 1))
-    rmse = np.sqrt(squared_error)
-
-    return rmse
+    return targets, predictions
 
 
 if __name__ == "__main__":
