@@ -24,10 +24,6 @@ ScalerType = Union[MinMaxScaler, StandardScaler,
 BatchType = Tuple[torch.Tensor, torch.Tensor]
 DataDateDictType = Dict[np.datetime64, BatchType]
 
-torch.set_printoptions(precision=2, sci_mode=False)
-np.set_printoptions(suppress=True,
-   formatter={'float_kind':'{:0.2f}'.format})
-
 
 class RiverFlowDataset(Dataset[Any]):
     def __init__(
@@ -207,11 +203,13 @@ class RiverFlowDataset(Dataset[Any]):
                     )
                 ]
                 # We sort the time features so we get
+                # [sin_24, cos_24, sin_23, cos_23, ..., sin_1, cos_1]
                 # [sin_1, cos_1, sin_2, cos_2, ..., sin_24, cos_24]
                 # regex there for more than one digit
                 df_time_features = df_time_features[
                     sorted(df_time_features.columns,
-                           key=lambda x: int(re.search(r'\d+$', x).group()))
+                           key=lambda x: int(re.search(r'\d+$', x).group()),
+                           reverse=True)
                 ]
 
                 # Only add one time feature as they are equal across stations
@@ -249,8 +247,6 @@ class RiverFlowDataset(Dataset[Any]):
             )
 
             last_river_measurement = flow_features[-1]
-
-            date_targets = date_targets - last_river_measurement[:, None]
 
             # We always want 6 predictions, so aggregate weekly into monthly
             if self.freq == "W":
@@ -450,6 +446,8 @@ def append_ndsi_ndvi_features(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
 
+        feature = torch.flip(feature, dims=(0,))
+
         date_features = torch.cat((date_features, feature), dim=1)
 
     if surface:
@@ -462,6 +460,8 @@ def append_ndsi_ndvi_features(
         feature = torch.from_numpy(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
+
+        feature = torch.flip(feature, dims=(0,))
 
         date_features = torch.cat((date_features, feature), dim=1)
 
@@ -477,6 +477,8 @@ def append_ndsi_ndvi_features(
         feature = torch.from_numpy(
             df_feature.to_numpy(dtype="float32").T[:, 0][:, None]
         )
+
+        feature = torch.flip(feature, dims=(0,))
 
         date_features = torch.cat((date_features, feature), dim=1)
 
