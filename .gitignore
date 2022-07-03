@@ -133,3 +133,5 @@ lightning_logs
 checkpoints
 experiments
 sweeps/
+figures/
+runs.sh
