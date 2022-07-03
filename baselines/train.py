@@ -55,8 +55,6 @@ def train(cfg: DictConfig) -> None:
                 **cfg.data
             )
 
-    print(dataset.data_date_dict)
-
     # Split dataset into training, validation and test
     train, val, test = data.split_dataset(dataset, cfg.data,
                                           val_year_min=1999,
