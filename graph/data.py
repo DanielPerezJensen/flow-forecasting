@@ -442,7 +442,7 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_index": sub_flows_sub
                     },
-                    ("subsub", "in", "measurements"): {
+                    ("subsub", "in", "measurement"): {
                         "edge_index": sub_in_msr
                     },
                     "measurement": {
