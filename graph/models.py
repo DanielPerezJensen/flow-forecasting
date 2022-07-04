@@ -193,7 +193,7 @@ class HeteroMLP(BaseModel):
             self.lag = 24
 
         self.mlp = geom_nn.MLP(
-            in_channels=cfg.model.convolution.out_channels,
+            in_channels=conv_out_dim,
             hidden_channels=cfg.model.hidden_dim,
             out_channels=6, num_layers=cfg.model.mlp_layers,
             dropout=cfg.model.mlp_dropout_prob,
