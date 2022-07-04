@@ -84,7 +84,7 @@ def train(cfg: DictConfig) -> None:
             model = models.HeteroSeqGRU(in_channels_dict, cfg, metadata, scaler)
         else:
             for key, value in data_sample.to_dict().items():
-                if isinstance(key, str):
+                if isinstance(key, str) and isinstance(value, dict):
                     in_channels_dict[key] = value["x"].shape[-1]
 
             model = models.HeteroMLP(in_channels_dict, cfg, metadata, scaler)

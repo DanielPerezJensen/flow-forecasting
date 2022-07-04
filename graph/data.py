@@ -372,7 +372,7 @@ class GraphFlowDataset(Dataset):
                     self.lag, n_subsubs, -1
                 )
 
-                date_NDSI_features = torch.flip(date_NDSI_features, dims=(0,))
+                date_NDVI_features = torch.flip(date_NDVI_features, dims=(0,))
 
                 subsub_features = torch.cat(
                     (subsub_features, date_NDVI_features), dim=2
