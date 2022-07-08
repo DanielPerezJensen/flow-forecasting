@@ -186,14 +186,13 @@ class HeteroMLP(BaseModel):
 
         self.convs = get_convs(metadata, **cfg.model.convolution)
 
-        # The lag is dictated by the data frequency
-        if cfg.data.freq == "M":
-            self.lag = 6
-        elif cfg.data.freq == "W":
-            self.lag = 24
+        conv_out_dim = cfg.model.convolution.out_channels
+
+        if cfg.model.convolution.name == "gat":
+            conv_out_dim = cfg.model.convolution.out_channels * cfg.model.convolution.heads
 
         self.mlp = geom_nn.MLP(
-            in_channels=cfg.model.convolution.out_channels,
+            in_channels=conv_out_dim,
             hidden_channels=cfg.model.hidden_dim,
             out_channels=6, num_layers=cfg.model.mlp_layers,
             dropout=cfg.model.mlp_dropout_prob,
@@ -244,7 +243,7 @@ class HeteroSeqGRU(BaseModel):
         # Node transformations to out_channels
         for node_type in metadata[0]:
             self.lin_dict[node_type] = geom_nn.Linear(
-                -1, cfg.model.convolution.out_channels
+                -1, cfg.model.convolution.out_channels 
             )
 
         self.convs = get_convs(metadata, **cfg.model.convolution)
@@ -255,8 +254,13 @@ class HeteroSeqGRU(BaseModel):
         elif cfg.data.freq == "W":
             self.lag = 24
 
+        conv_out_dim = cfg.model.convolution.out_channels
+
+        if cfg.model.convolution.name == "gat":
+            conv_out_dim = cfg.model.convolution.out_channels * cfg.model.convolution.heads
+
         self.rnn = nn.LSTM(
-            cfg.model.convolution.out_channels, cfg.model.hidden_dim,
+            conv_out_dim, cfg.model.hidden_dim,
             batch_first=True
         )
 
@@ -271,7 +275,7 @@ class HeteroSeqGRU(BaseModel):
 
         # [B, T, N, D] -> [B x T x N, D] -> [B x T x N, H]
         x_dict = {
-            node _type: self.lin_dict[node_type](
+            node_type: self.lin_dict[node_type](
                 torch.flatten(x_dict[node_type], 0, 2)
             ) for node_type, x in x_dict.items()
         }
@@ -287,8 +291,6 @@ class HeteroSeqGRU(BaseModel):
 
         # Take out measurement nodes and reshape to proper output
         msr_out = x_dict["measurement"]
-
-        print(msr_out.shape)
 
         # Reshape to [batch_size, lag, n_stations, dimension]
         msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
@@ -363,9 +365,8 @@ def get_convs(
         for _ in range(kwargs["num_layers"]):
             convs.append(geom_nn.HeteroConv({
                 edge_type: geom_nn.SAGEConv(
-                    in_channels=kwargs["out_channels"],
+                    in_channels=-1,
                     out_channels=kwargs["out_channels"],
-                    aggr="sum",
                 ) for edge_type in metadata[1]
             }))
 
@@ -373,11 +374,10 @@ def get_convs(
         for _ in range(kwargs["num_layers"]):
             convs.append(geom_nn.HeteroConv({
                 edge_type: geom_nn.GATv2Conv(
-                    in_channels=kwargs["out_channels"],
+                    in_channels=-1,
                     out_channels=kwargs["out_channels"],
                     heads=kwargs["heads"],
                     dropout=kwargs["dropout_prob"],
-                    aggr="sum"
                 ) for edge_type in metadata[1]
             }))
 
@@ -389,7 +389,6 @@ def get_convs(
                 metadata=metadata,
                 heads=kwargs["heads"],
                 dropout=kwargs["dropout_prob"],
-                group="sum"
             ))
 
     return convs
