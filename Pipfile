@@ -34,6 +34,7 @@ torchmetrics = "==0.8.2"
 kaleido = "*"
 SciencePlots = "*"
 class-resolver = "*"
+pygraphviz = "*"
 
 [dev-packages]
 
