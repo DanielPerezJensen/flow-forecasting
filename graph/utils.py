@@ -57,7 +57,7 @@ def predict(
     predictions = np.array(predictions)
     values = np.array(values)
 
-    return predictions, values
+    return values, predictions
 
 
 def format_predictions(

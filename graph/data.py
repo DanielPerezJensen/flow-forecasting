@@ -372,7 +372,7 @@ class GraphFlowDataset(Dataset):
                     self.lag, n_subsubs, -1
                 )
 
-                date_NDSI_features = torch.flip(date_NDSI_features, dims=(0,))
+                date_NDVI_features = torch.flip(date_NDVI_features, dims=(0,))
 
                 subsub_features = torch.cat(
                     (subsub_features, date_NDVI_features), dim=2
@@ -442,7 +442,7 @@ class GraphFlowDataset(Dataset):
                     ("subsub", "flows", "subsub"): {
                         "edge_index": sub_flows_sub
                     },
-                    ("subsub", "in", "measurements"): {
+                    ("subsub", "in", "measurement"): {
                         "edge_index": sub_in_msr
                     },
                     "measurement": {
@@ -460,6 +460,48 @@ class GraphFlowDataset(Dataset):
                 data = HeteroData(mapping)
 
             self.data_date_dict[date] = data
+
+
+    def plot_graph(self, mapping):
+
+        import pygraphviz as pgv
+        import json
+
+        G = pgv.AGraph(directed=True)
+
+        with open("data/processed/static/subsub.json", "r") as f:
+            subsub_mapping = json.load(f)
+            subsub_mapping = dict((v, k) for k, v in subsub_mapping.items())
+
+        with open("data/processed/static/measurement.json", "r") as f:
+            msr_mapping = json.load(f)
+            msr_mapping = dict((v, k) for k, v in msr_mapping.items())
+
+        for key, value in mapping.items():
+            if isinstance(key, tuple):
+                if self.sequential:
+                    edge_index = value["edge_indices"][0]
+                else:
+                    edge_index = value["edge_index"]
+
+                for edge in edge_index.T:
+                    src = edge[0].item()
+                    dst = edge[1].item()
+
+                    if key[0] == "subsub":
+                        src = subsub_mapping[src]
+                    else:
+                        src = msr_mapping[src]
+
+                    if key[2] == "subsub":
+                        dst = subsub_mapping[dst]
+                    else:
+                        dst = msr_mapping[dst]
+
+                    G.add_edge(src, dst)
+
+        G.layout(prog="dot")
+        G.draw(f"{self.graph_type}.png")
 
     def set_data(self, date: np.datetime64, value: HeteroData) -> None:
         """
