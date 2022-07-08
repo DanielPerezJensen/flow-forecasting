@@ -176,15 +176,15 @@ class HeteroMLP(BaseModel):
 
         super().__init__(cfg, metadata, scaler)
 
-        self.convs, conv_out_dim = get_convs(
-            in_channels_dict, metadata, **cfg.model.convolution
-        )
+        self.lin_dict = nn.ModuleDict()
 
-        # Layer Norm for each node type
-        self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.LayerNorm(conv_out_dim)
-                for node in metadata[0]}
-        )
+        # Node transformations to out_channels
+        for node_type in metadata[0]:
+            self.lin_dict[node_type] = geom_nn.Linear(
+                -1, cfg.model.convolution.out_channels
+            )
+
+        self.convs = get_convs(metadata, **cfg.model.convolution)
 
         # The lag is dictated by the data frequency
         if cfg.data.freq == "M":
@@ -193,7 +193,7 @@ class HeteroMLP(BaseModel):
             self.lag = 24
 
         self.mlp = geom_nn.MLP(
-            in_channels=conv_out_dim,
+            in_channels=cfg.model.convolution.out_channels,
             hidden_channels=cfg.model.hidden_dim,
             out_channels=6, num_layers=cfg.model.mlp_layers,
             dropout=cfg.model.mlp_dropout_prob,
@@ -203,17 +203,18 @@ class HeteroMLP(BaseModel):
         self.loss_fn = nn.MSELoss()
 
     def forward(self, x_dict, edge_index_dict):
-        # Apply message passing
-        conv_out = self.convs[0](x_dict, edge_index_dict)
-        for conv in self.convs[1:]:
-            conv_out = conv(conv_out, edge_index_dict)
 
-        # Normalize output of message passing
-        for node_type, out in conv_out.items():
-            conv_out[node_type] = self.conv_normalizations[node_type](out)
+        x_dict = {
+            node_type: self.lin_dict[node_type](x)
+            for node_type, x in x_dict.items()
+        }
+
+        # Apply message passing
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
 
         # Take out measurement nodes and reshape to proper output
-        msr_out = conv_out["measurement"]
+        msr_out = x_dict["measurement"]
 
         mlp_out = self.mlp(msr_out)
 
@@ -238,15 +239,15 @@ class HeteroSeqGRU(BaseModel):
 
         super().__init__(cfg, metadata, scaler)
 
-        self.convs, conv_out_dim = get_convs(
-            in_channels_dict, metadata, **cfg.model.convolution
-        )
+        self.lin_dict = nn.ModuleDict()
 
-        # Layer Norm for each node type
-        self.conv_normalizations = nn.ModuleDict(
-            {node: geom_nn.BatchNorm(conv_out_dim)
-                for node in metadata[0]}
-        )
+        # Node transformations to out_channels
+        for node_type in metadata[0]:
+            self.lin_dict[node_type] = geom_nn.Linear(
+                -1, cfg.model.convolution.out_channels
+            )
+
+        self.convs = get_convs(metadata, **cfg.model.convolution)
 
         # The lag is dictated by the data frequency
         if cfg.data.freq == "M":
@@ -255,7 +256,7 @@ class HeteroSeqGRU(BaseModel):
             self.lag = 24
 
         self.rnn = nn.LSTM(
-            conv_out_dim, cfg.model.hidden_dim,
+            cfg.model.convolution.out_channels, cfg.model.hidden_dim,
             batch_first=True
         )
 
@@ -268,11 +269,12 @@ class HeteroSeqGRU(BaseModel):
     ) -> torch.Tensor:
         batch_size = x_dict["measurement"].size(0)
 
-        final_inp = x_dict["measurement"][:, -1, :, -1][:, :, None]
-
-        # [B, T, N, D] -> [B x T x N, D]
-        for node_type in x_dict:
-            x_dict[node_type] = torch.flatten(x_dict[node_type], 0, 2)
+        # [B, T, N, D] -> [B x T x N, D] -> [B x T x N, H]
+        x_dict = {
+            node _type: self.lin_dict[node_type](
+                torch.flatten(x_dict[node_type], 0, 2)
+            ) for node_type, x in x_dict.items()
+        }
 
         # Format edges to expected format of -> [2, M]
         for edge_type in edge_index_dict:
@@ -280,17 +282,13 @@ class HeteroSeqGRU(BaseModel):
                 edge_type
             ].permute((0, 2, 1)).flatten(0, 1).T
 
-        # Apply message passing
-        conv_out = self.convs[0](x_dict, edge_index_dict)
-        for conv in self.convs[1:]:
-            conv_out = conv(conv_out, edge_index_dict)
-
-        # Normalize output of message passing
-        for node_type, out in conv_out.items():
-            conv_out[node_type] = self.conv_normalizations[node_type](out)
+        for conv in self.convs:
+            x_dict = conv(x_dict, edge_index_dict)
 
         # Take out measurement nodes and reshape to proper output
-        msr_out = conv_out["measurement"]
+        msr_out = x_dict["measurement"]
+
+        print(msr_out.shape)
 
         # Reshape to [batch_size, lag, n_stations, dimension]
         msr_out = msr_out.reshape((batch_size, self.lag, 4, -1))
@@ -298,7 +296,6 @@ class HeteroSeqGRU(BaseModel):
         msr_out = msr_out.permute((0, 2, 1, 3))
         # Flatten into [batch_size * n_stations, lag, dimension]
         msr_out = msr_out.flatten(0, 1)
-
         gru_out, _ = self.rnn(msr_out)
 
         gru_out = gru_out[:, -1, :]
@@ -355,88 +352,44 @@ def get_optimizer(optimizer_name: str) -> Callable[..., torch.optim.Optimizer]:
 
 
 def get_convs(
-    in_channels_dict: Dict[str, int],
     metadata: Tuple[List[str], List[Tuple[str, str, str]]],
     **kwargs: Any
-) -> Tuple[nn.ModuleList, int]:
+) -> nn.ModuleList:
 
     # Convolutions dictated by config
     convs = nn.ModuleList()
 
     if kwargs["name"] == "sage":
-        conv_out_dim = kwargs["out_channels"]
-
-        first_hetero_conv = geom_nn.HeteroConv({
-            edge_type: geom_nn.SAGEConv(
-                in_channels=(
-                    in_channels_dict[edge_type[0]],
-                    in_channels_dict[edge_type[2]]
-                ),
-                out_channels=kwargs["out_channels"]
-            ) for edge_type in metadata[1]
-        })
-
-        convs.append(first_hetero_conv)
-
-        for _ in range(1, kwargs["num_layers"]):
+        for _ in range(kwargs["num_layers"]):
             convs.append(geom_nn.HeteroConv({
                 edge_type: geom_nn.SAGEConv(
-                    in_channels=conv_out_dim,
-                    out_channels=kwargs["out_channels"]
+                    in_channels=kwargs["out_channels"],
+                    out_channels=kwargs["out_channels"],
+                    aggr="sum",
                 ) for edge_type in metadata[1]
             }))
 
     elif kwargs["name"] == "gat":
-        conv_out_dim = (
-            kwargs["out_channels"] *
-            kwargs["heads"]
-        )
-
-        first_hetero_conv = geom_nn.HeteroConv({
-            edge_type: geom_nn.GATv2Conv(
-                in_channels=(
-                    in_channels_dict[edge_type[0]],
-                    in_channels_dict[edge_type[2]]
-                ),
-                out_channels=kwargs["out_channels"],
-                heads=kwargs["heads"],
-                dropout=kwargs["dropout_prob"]
-            ) for edge_type in metadata[1]
-        })
-
-        convs.append(first_hetero_conv)
-
-        for _ in range(1, kwargs["num_layers"]):
+        for _ in range(kwargs["num_layers"]):
             convs.append(geom_nn.HeteroConv({
                 edge_type: geom_nn.GATv2Conv(
-                    in_channels=conv_out_dim,
+                    in_channels=kwargs["out_channels"],
                     out_channels=kwargs["out_channels"],
                     heads=kwargs["heads"],
-                    dropout=kwargs["dropout_prob"]
+                    dropout=kwargs["dropout_prob"],
+                    aggr="sum"
                 ) for edge_type in metadata[1]
             }))
 
-    elif kwargs["name"] == "mlp":
-        conv_out_dim = kwargs["out_channels"]
-
-        first_hetero_conv = geom_nn.HeteroConv({
-            edge_type: MLPConv(
-                in_channels=(
-                    in_channels_dict[edge_type[0]],
-                    in_channels_dict[edge_type[2]]
-                ),
+    elif kwargs["name"] == "han":
+        for _ in range(kwargs["num_layers"]):
+            convs.append(geom_nn.HANConv(
+                in_channels=kwargs["out_channels"],
                 out_channels=kwargs["out_channels"],
-            ) for edge_type in metadata[1]
-        })
+                metadata=metadata,
+                heads=kwargs["heads"],
+                dropout=kwargs["dropout_prob"],
+                group="sum"
+            ))
 
-        convs.append(first_hetero_conv)
-
-        for _ in range(1, kwargs["num_layers"]):
-            convs.append(geom_nn.HeteroConv({
-                edge_type: MLPConv(
-                    in_channels=conv_out_dim,
-                    out_channels=kwargs["out_channels"],
-                ) for edge_type in metadata[1]
-            }))
-
-    return convs, conv_out_dim
+    return convs
