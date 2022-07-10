@@ -381,14 +381,4 @@ def get_convs(
                 ) for edge_type in metadata[1]
             }))
 
-    elif kwargs["name"] == "han":
-        for _ in range(kwargs["num_layers"]):
-            convs.append(geom_nn.HANConv(
-                in_channels=kwargs["out_channels"],
-                out_channels=kwargs["out_channels"],
-                metadata=metadata,
-                heads=kwargs["heads"],
-                dropout=kwargs["dropout_prob"],
-            ))
-
     return convs
