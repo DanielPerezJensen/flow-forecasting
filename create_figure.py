@@ -9,7 +9,7 @@ from typing import Any, List
 
 
 plt.style.use(['science', 'ieee', 'std-colors'])
-plt.rcParams.update({'figure.dpi': '100', 'figure.figsize': (10, 7.5)})
+plt.rcParams.update({'figure.dpi': '100', 'figure.figsize': (6, 4)})
 
 
 def main(
@@ -41,12 +41,12 @@ def plot_all(
         file_dir = os.path.join(root, file)
 
         if summer:
-            title = "RMSE for prediction of summer months"
+            title = "RMSE Curve - Summer Predictions"
             filename = "summer.npy"
             months = [10, 11, 12, 1, 2, 3]
             x = [datetime(1, int(m), 1).strftime("%b") for m in months]
         else:
-            title = "RMSE for prediction of all months in dataset"
+            title = "RMSE Curve - All Predictions"
             filename = "all.npy"
             x = np.arange(6)
 
@@ -69,18 +69,18 @@ def plot_all(
         sqrt_rmse = np.sqrt(mean_mse).std(axis=0)
 
         plt.plot(
-            x, mean_rmse, label=f"{label}-$\\mu={np.mean(mean_rmse):.3f}$"
+            x, mean_rmse, label=f"{label}: $\\mu={np.mean(mean_rmse):.3f}$"
         )
         plt.fill_between(x, mean_rmse - sqrt_rmse, mean_rmse + sqrt_rmse, alpha=0.2)
 
     plt.title(title)
-    plt.xlabel("$\\text{n\\textsuperscript{th}}$ prediction")
+    plt.xlabel("$\\text{t}^{th}$ prediction")
     plt.ylabel("RMSE")
 
     plt.legend()
 
     if save_dir:
-        plt.savefig(os.path.join(f"figures/{save_dir}/all/figure.png"))
+        plt.savefig(os.path.join(f"figures/{save_dir}/all/figure.pdf"))
         plt.clf()
     else:
         plt.show()
@@ -94,12 +94,12 @@ def plot_stations(
         file_dir = os.path.join(root, file)
 
         if summer:
-            title = "RMSE for prediction of summer months"
+            title = "RMSE Curve - Summer Predictions"
             filename = "summer.npy"
             months = [10, 11, 12, 1, 2, 3]
             x = [datetime(1, int(m), 1).strftime("%b") for m in months]
         else:
-            title = "RMSE for prediction of all months in dataset"
+            title = "RMSE Curve - Summer Predictions"
             filename = "all.npy"
             x = np.arange(6)
 
@@ -132,17 +132,17 @@ def plot_stations(
             plt.figure(station)
 
             plt.plot(
-                x, mean_rmse, label=f"{label}-$\\mu={np.mean(mean_rmse):.3f}$"
+                x, mean_rmse, label=f"{label}: $\\mu={np.mean(mean_rmse):.3f}$"
             )
             plt.fill_between(x, mean_rmse - sqrt_rmse, mean_rmse + sqrt_rmse, alpha=0.2)
 
             plt.title(title + ": " + station_dict[station])
-            plt.xlabel("$\\text{n\\textsuperscript{th}}$ prediction")
+            plt.xlabel("$\\text{t}^{th}$ prediction")
             plt.ylabel("RMSE")
             plt.legend()
 
             if save_dir:
-                plt.savefig(os.path.join(f"figures/{save_dir}/stations/{station_dict[station]}.png"))
+                plt.savefig(os.path.join(f"figures/{save_dir}/stations/{station_dict[station]}.pdf"))
 
     if not save_dir:
         plt.show()
@@ -221,7 +221,7 @@ def plot_scatter(
 
             if save_dir:
                 os.makedirs(os.path.join(f"figures/{save_dir}/scatter/{label}"), exist_ok=True)
-                plt.savefig(os.path.join(f"figures/{save_dir}/scatter/{label}/{lag}.png"))
+                plt.savefig(os.path.join(f"figures/{save_dir}/scatter/{label}/{lag}.pdf"))
 
     if not save_dir:
         plt.show()
