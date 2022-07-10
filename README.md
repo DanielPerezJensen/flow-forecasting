@@ -18,5 +18,28 @@ You can check the package index and find the correct version for your machine, a
 
 Installing the environment using the Pipfile contains all modules used in both the graph and baselines subdirectories.
 
-## Other stuff
-TODO
+## Running the models
+To run the models simply call train.py in each of the directories. Configuration options are detailed in the respective config folders. To for example run a graph model using the standard scaler, while including ndsi index and surface data simply do:
+
+```bash
+cd graph
+python train.py data.scaler_name=standard data.ndsi.index=True data.ndsi.surface=True
+```
+
+To save the run, indicate it using `run.save=True` and name it using `run.name=<some-name>`, the name by default is base. To run across multiple seeds, specifiy a list of seeds `run.seeds=[1,2,3,4,5]`
+
+Experiments are saved in the experiments folder, we save the outputs and targets for the validation and test set, and a metrics.txt which indicates the RMSE and NSE for each seed. 
+
+To train all the models used in the results section please run `./run.sh`. This will save all experiments showed in the tables in experiments/baselines and experiments/graphs. To run the non-parametric heuristics also displayed in the results, please run 
+```bash
+cd baselines
+python heuristics.py --model AverageMonth
+python heuristics.py --model PreviousMonth
+```
+
+To generate the results you can use create_figure.py. To create all the plots displayed in the results, you should run:
+```bash
+python create_figure.py --files baselines/gru-base graph/HeteroMLP-base graph/HeteroSeq-base heuristics/AverageMonth heuristics/PreviousMonth --labels bGRU gHMLP gHSeq bAvg bPrev --plot_all --plot_scatter --plot_stations --save_dir all_models
+```
+
+Any other experiment can also be plotted in this way by specifying the run name and its label.
