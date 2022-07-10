@@ -47,6 +47,9 @@ def train(cfg: DictConfig) -> None:
     summer_months_collection = []
     all_months_collection = []
 
+    rmses = []
+    nses = []
+
     processed_path = os.path.join(get_original_cwd(), "data", "processed")
 
     dataset = data.RiverFlowDataset(
@@ -108,6 +111,10 @@ def train(cfg: DictConfig) -> None:
 
         # Save run in case config indicates it
         if cfg.run.save:
+
+            rmses.append(trainer.logged_metrics["val_rmse"].item())
+            nses.append(trainer.logged_metrics["val_nse"].item())
+
             summer_trgs, summer_preds = gather_preds(model, True, val, test)
             trgs, preds = gather_preds(model, False, val, test)
 
@@ -124,6 +131,19 @@ def train(cfg: DictConfig) -> None:
             (cfg.model.name + "-" + cfg.run.name)
         )
         os.makedirs(save_dir, exist_ok=True)
+
+        rmses_mean, rmses_std = np.mean(rmses), np.std(rmses)
+        nses_mean, nses_std = np.mean(nses), np.std(nses)
+
+        with open(os.path.join(save_dir, "metrics.txt"), "w") as f:
+            f.write("RMSE:\n")
+            f.write(f"[{', '.join(format(x, '.3f') for x in rmses)}]\n")
+            f.write("Mean, std: ")
+            f.write(f"{rmses_mean:.3f}, ({rmses_std:.3f})\n\n")
+            f.write("NSE:\n")
+            f.write(f"[{', '.join(format(x, '.3f') for x in nses)}]\n")
+            f.write("Mean, std: ")
+            f.write(f"{nses_mean:.3f}, ({nses_std:.3f})")
 
         summer_months = np.stack(summer_months_collection, axis=0)
         all_months = np.stack(all_months_collection, axis=0)
